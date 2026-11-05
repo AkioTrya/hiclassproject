@@ -2,25 +2,25 @@
 
 :root {
   font-family: 'DM Sans', sans-serif;
-  color: #f3f0e9;
-  background: #0a0b0e;
+  color: #f5f1e6;
+  background: #0a0a0c;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-optical-sizing: auto;
   font-weight: 400;
-  --gold: #d7b761;
-  --muted: #8b8d98;
+  --gold: #d4af37;
+  --muted: #a8b2c8;
 }
 
 * { box-sizing: border-box; }
-html { min-width: 320px; scroll-behavior: smooth; }
-body { margin: 0; min-width: 320px; min-height: 100vh; }
+html { min-width: 0; scroll-behavior: smooth; }
+body { margin: 0; min-width: 0; min-height: 100vh; }
 button, input, select { font: inherit; }
 button { color: inherit; }
-button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #e1c66c; outline-offset: 3px; }
-::selection { color: #111; background: #d7b761; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #f0d77a; outline-offset: 3px; }
+::selection { color: #0a0a0c; background: #d4af37; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
   ArrowDownRight,
   ArrowRight,
@@ -22,10 +23,12 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
-  Users,
   X,
 } from 'lucide-react'
 import './App.css'
+import GoldThreadCanvas from './GoldThreadCanvas.jsx'
+import { ClassCountdown, FeatureCard, GoldDust, HeroHeadline } from './LandingMotion.jsx'
+import { useServerClock } from './useServerClock.js'
 import {
   DAYS,
   SCHEDULE_DAYS,
@@ -34,7 +37,6 @@ import {
   getInitialSelectedDay,
   getJakartaDateParts,
   getNextClass,
-  getNextDateForDay,
   getWeekDate,
   initialSchedules,
   isValidSchedule,
@@ -50,7 +52,17 @@ function readSchedules() {
       console.error('Stored schedule data is invalid; using the included class schedule.')
       return { schedules: initialSchedules, error: 'Data jadwal lokal tidak valid. Jadwal contoh ditampilkan.' }
     }
-    return { schedules: parsed, error: '' }
+    const schedules = parsed.filter((item) => !['INF625104', 'INF625108'].includes(item.code))
+    let migrationError = ''
+    if (schedules.length !== parsed.length) {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(schedules))
+      } catch (error) {
+        console.error('Could not remove the retired Saturday practicals from saved schedules.', error)
+        migrationError = 'Praktikum Sabtu sudah dihapus dari tampilan, tetapi pembaruan belum tersimpan di perangkat ini.'
+      }
+    }
+    return { schedules, error: migrationError }
   } catch (error) {
     console.error('Could not read the saved class schedule.', error)
     return { schedules: initialSchedules, error: 'Jadwal lokal tidak dapat dibaca. Jadwal contoh ditampilkan.' }
@@ -67,14 +79,25 @@ function Brand({ onClick }) {
 }
 
 function Header({ page, onHome, onSchedule, onAdmin }) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const navigateHome = () => {
+    setMobileMenuOpen(false)
+    onHome()
+  }
+  const navigateSchedule = () => {
+    setMobileMenuOpen(false)
+    onSchedule()
+  }
+
   return (
     <header className="topbar">
       <div className="topbar-inner">
-        <Brand onClick={onHome} />
-        <nav className="main-nav" aria-label="Navigasi utama">
-          <button className={page === 'home' ? 'nav-link active' : 'nav-link'} onClick={onHome}>Beranda</button>
-          <button className={page === 'schedule' ? 'nav-link active' : 'nav-link'} onClick={onSchedule}>Jadwal</button>
-          <a className="nav-link" href="#tentang" onClick={onHome}>Tentang</a>
+        <Brand onClick={navigateHome} />
+        <nav className={mobileMenuOpen ? 'main-nav mobile-open' : 'main-nav'} id="primary-navigation" aria-label="Navigasi utama">
+          <button className={page === 'home' ? 'nav-link active' : 'nav-link'} onClick={navigateHome}>Beranda</button>
+          <button className={page === 'schedule' ? 'nav-link active' : 'nav-link'} onClick={navigateSchedule}>Jadwal</button>
+          <a className="nav-link" href="#tentang" onClick={navigateHome}>Tentang</a>
+          {import.meta.env.DEV && <button className="nav-link mobile-admin-link" onClick={() => { setMobileMenuOpen(false); onAdmin() }}>Demo admin</button>}
         </nav>
         <div className="topbar-actions">
           <button className="icon-button notification-button" aria-label="Pengumuman">
@@ -83,141 +106,64 @@ function Header({ page, onHome, onSchedule, onAdmin }) {
           <button className="avatar" aria-label="Kelas A">A</button>
           {import.meta.env.DEV && <button className="user-name" onClick={onAdmin}>Demo admin <ChevronDown size={14} /></button>}
         </div>
-        <button className="mobile-menu icon-button" aria-label="Buka menu"><Menu size={20} /></button>
+        <button className="mobile-menu icon-button" aria-label={mobileMenuOpen ? 'Tutup menu' : 'Buka menu'} aria-expanded={mobileMenuOpen} aria-controls="primary-navigation" onClick={() => setMobileMenuOpen((isOpen) => !isOpen)}><Menu size={20} /></button>
       </div>
     </header>
   )
 }
 
-function GoldThread({ landingRef }) {
-  const pathRef = useRef(null)
-  const pathLengthRef = useRef(0)
-  const frameRef = useRef(0)
-
-  useEffect(() => {
-    const root = landingRef.current
-    const path = pathRef.current
-    if (!root || !path) return undefined
-
-    const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)')
-    let revealObserver
-
-    const updateProgress = () => {
-      frameRef.current = 0
-      if (motionPreference.matches) {
-        path.style.strokeDashoffset = '0'
-        return
-      }
-      const bounds = root.getBoundingClientRect()
-      const visibleProgress = Math.min(1, Math.max(0, (window.innerHeight - bounds.top) / bounds.height))
-      path.style.strokeDashoffset = String(pathLengthRef.current * (1 - visibleProgress))
-    }
-
-    const scheduleProgressUpdate = () => {
-      if (!frameRef.current) frameRef.current = window.requestAnimationFrame(updateProgress)
-    }
-
-    const measurePath = () => {
-      const bounds = root.getBoundingClientRect()
-      const hero = root.querySelector('.hero-section')?.getBoundingClientRect()
-      const preview = root.querySelector('.hero-preview')?.getBoundingClientRect()
-      const featureSection = root.querySelector('.landing-features')?.getBoundingClientRect()
-      const footer = root.querySelector('.landing-footer')?.getBoundingClientRect()
-      if (!hero || !preview || !featureSection || !footer) return
-
-      const relativeY = (value) => value - bounds.top
-      const points = [
-        { x: bounds.width - 14, y: relativeY(hero.top) + 18 },
-        { x: preview.right - bounds.left + 14, y: relativeY(hero.bottom) - 12 },
-        { x: bounds.width - 10, y: relativeY(featureSection.bottom) - 10 },
-        { x: 10, y: relativeY(featureSection.bottom) - 10 },
-        { x: 10, y: relativeY(footer.bottom) - 8 },
-      ]
-
-      const commands = [`M ${points[0].x} ${points[0].y}`]
-      for (let index = 1; index < points.length; index += 1) {
-        const previous = points[index - 1]
-        const current = points[index]
-        const middleY = previous.y + (current.y - previous.y) / 2
-        commands.push(`C ${previous.x} ${middleY}, ${current.x} ${middleY}, ${current.x} ${current.y}`)
-      }
-      path.setAttribute('d', commands.join(' '))
-      pathLengthRef.current = path.getTotalLength()
-      path.style.strokeDasharray = `${pathLengthRef.current}`
-      path.style.strokeDashoffset = String(pathLengthRef.current)
-      scheduleProgressUpdate()
-    }
-
-    const revealTargets = [...root.querySelectorAll('.feature-item')]
-    if (motionPreference.matches || !('IntersectionObserver' in window)) {
-      revealTargets.forEach((element) => element.classList.add('is-visible', 'is-lit'))
-    } else {
-      revealObserver = new IntersectionObserver((entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) entry.target.classList.add('is-visible', 'is-lit')
-          else entry.target.classList.remove('is-lit')
-        })
-      }, { threshold: 0.18, rootMargin: '0px 0px -8% 0px' })
-      revealTargets.forEach((element, index) => {
-        element.classList.add('reveal-ready')
-        element.style.setProperty('--reveal-delay', `${index * 100}ms`)
-        revealObserver.observe(element)
-      })
-    }
-
-    const resizeObserver = new ResizeObserver(measurePath)
-    resizeObserver.observe(root)
-    window.addEventListener('scroll', scheduleProgressUpdate, { passive: true })
-    window.addEventListener('resize', measurePath)
-    motionPreference.addEventListener('change', scheduleProgressUpdate)
-    measurePath()
-
-    return () => {
-      if (frameRef.current) window.cancelAnimationFrame(frameRef.current)
-      frameRef.current = 0
-      resizeObserver.disconnect()
-      revealObserver?.disconnect()
-      window.removeEventListener('scroll', scheduleProgressUpdate)
-      window.removeEventListener('resize', measurePath)
-      motionPreference.removeEventListener('change', scheduleProgressUpdate)
-    }
-  }, [landingRef])
-
-  return (
-    <svg className="gold-thread-scroll" aria-hidden="true">
-      <path ref={pathRef} className="gold-thread-path" fill="none" stroke="url(#gold-thread-gradient)" strokeWidth="1.25" strokeLinecap="round" />
-      <defs>
-        <linearGradient id="gold-thread-gradient" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0%" stopColor="#d7b761" stopOpacity=".25" />
-          <stop offset="45%" stopColor="#f0d77a" stopOpacity=".82" />
-          <stop offset="100%" stopColor="#d7b761" stopOpacity=".3" />
-        </linearGradient>
-      </defs>
-    </svg>
-  )
-}
-
 function LandingPage({ onSchedule, now, schedules }) {
-  const landingRef = useRef(null)
+  const reducedMotion = useReducedMotion()
   const parts = getJakartaDateParts(now)
   const nextClass = getNextClass(schedules, parts)
   const nextClassDate = nextClass ? new Date(nextClass.startsAt) : null
-  const relativeDay = nextClass?.dayOffset === 0 ? 'HARI INI' : nextClass?.dayOffset === 1 ? 'BESOK' : `DALAM ${nextClass?.dayOffset} HARI`
+  const relativeDay = !nextClass ? '' : nextClass.dayOffset === 0 ? 'HARI INI' : nextClass.dayOffset === 1 ? 'BESOK' : `DALAM ${nextClass.dayOffset} HARI`
+  const currentTime = `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`
+  const currentClass = schedules.find((item) => item.day === parts.weekday && item.start <= currentTime && currentTime < item.end)
+  const minuteOfDay = parts.hour * 60 + parts.minute
+  const todayClasses = schedules.filter((item) => item.day === parts.weekday)
+  const totalClassMinutes = todayClasses.reduce((total, item) => {
+    const [startHour, startMinute] = item.start.split(':').map(Number)
+    const [endHour, endMinute] = item.end.split(':').map(Number)
+    return total + endHour * 60 + endMinute - startHour * 60 - startMinute
+  }, 0)
+  const completedClassMinutes = todayClasses.reduce((total, item) => {
+    const [startHour, startMinute] = item.start.split(':').map(Number)
+    const [endHour, endMinute] = item.end.split(':').map(Number)
+    const start = startHour * 60 + startMinute
+    const end = endHour * 60 + endMinute
+    return total + Math.max(0, Math.min(end - start, minuteOfDay - start))
+  }, 0)
+  const classProgress = totalClassMinutes > 0 ? Math.min(1, completedClassMinutes / totalClassMinutes) : 0
+  const jakartaNow = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second)
+  const minutesUntilNextClass = nextClass ? Math.max(1, Math.ceil((nextClass.startsAt - jakartaNow) / 60_000)) : 0
+  const radarStatus = currentClass
+    ? 'Berlangsung'
+    : nextClass?.dayOffset === 0
+      ? `Mulai ${minutesUntilNextClass} mnt lagi`
+      : nextClass ? `Berikutnya ${relativeDay.toLowerCase()}` : 'Belum ada jadwal'
+  const previewDay = currentClass?.day ?? nextClass?.item.day
+  const dayClasses = schedules.filter((item) => item.day === previewDay).sort((a, b) => a.start.localeCompare(b.start))
+  const currentClassIndex = currentClass ? dayClasses.findIndex((item) => item.id === currentClass.id) : -1
+  const previewClasses = currentClassIndex >= 0
+    ? dayClasses.slice(Math.max(0, currentClassIndex - 1), currentClassIndex + 2)
+    : dayClasses.filter((item) => !nextClass || item.start >= nextClass.item.start).slice(0, 3)
   return (
-    <main className="landing" ref={landingRef}>
-      <GoldThread landingRef={landingRef} />
+    <main className="landing">
+      <GoldThreadCanvas />
       <section className="hero-section">
-        <div className="hero-thread" aria-hidden="true"><span /></div>
+        <motion.div className="hero-ambience" aria-hidden="true" animate={reducedMotion ? {} : { scale: [1, 1.04, 1], opacity: [0.35, 0.58, 0.35] }} transition={{ duration: 24, repeat: Infinity, ease: 'easeInOut' }} />
+        <GoldDust />
         <div className="hero-copy">
           <div className="eyebrow"><span className="eyebrow-dot" /> RUANG KELAS, LEBIH TERATUR</div>
-          <h1><span className="hero-title-line"><span className="hero-word" style={{ '--word-delay': '80ms' }}>Waktu</span> <span className="hero-word" style={{ '--word-delay': '140ms' }}>terbaik</span></span><br /><span className="hero-title-line"><span className="hero-word" style={{ '--word-delay': '200ms' }}>dimulai</span> <span className="hero-word" style={{ '--word-delay': '260ms' }}>dari</span> <em className="hero-word hero-gold-word" style={{ '--word-delay': '320ms' }}>jadwal</em><span className="gold-dot">.</span></span></h1>
+          <HeroHeadline />
           <div className="hero-buttons">
-            <button className="button button-gold" onClick={onSchedule}>Lihat jadwal <ArrowRight size={17} /></button>
+            <motion.button className="button button-gold" onClick={onSchedule} whileTap={reducedMotion ? undefined : { scale: 0.98 }} transition={{ duration: 0.18, ease: 'easeOut' }}>Lihat jadwal <ArrowRight size={17} /></motion.button>
             <button className="button button-quiet" onClick={onSchedule}>Jadwal minggu ini <ArrowDownRight size={16} /></button>
           </div>
           <div className="class-meta">
-            <div className="avatar-stack"><span>A</span><span>N</span><span>R</span><span>+</span></div>
-            <span><strong>Kelas A</strong></span>
+            <span className="class-meta-mark"><CalendarDays size={16} /></span>
+            <span>Agenda kuliah <strong>Kelas A</strong></span>
           </div>
         </div>
         <div className="hero-preview">
@@ -227,25 +173,73 @@ function LandingPage({ onSchedule, now, schedules }) {
             {nextClass && <span className="live-pill"><span /> {relativeDay}</span>}
           </div>
           {nextClass ? <div className="next-class">
-            <div className="class-time"><span>{nextClass.item.start}</span><i /><span>{nextClass.item.end}</span></div>
             <div className="next-class-info">
               <span className="course-code">{nextClass.item.code} <span>·</span> {nextClass.item.credits} SKS</span>
               <h2>{nextClass.item.name}</h2>
-              <div className="class-detail"><span><MapPin size={14} /> {nextClass.item.room}</span><span><Users size={14} /> Kelas A</span></div>
+              <div className="class-detail"><span><Clock3 size={15} /> {nextClass.item.start}–{nextClass.item.end}</span><span><MapPin size={15} /> {nextClass.item.room}</span></div>
+              <ClassCountdown targetTime={nextClass.startsAt} now={now} />
             </div>
-            <div className="course-art"><BookOpen size={23} strokeWidth={1.4} /></div>
+            <div className="course-art"><BookOpen size={22} strokeWidth={1.4} /></div>
           </div> : <div className="next-class"><p>Jadwal kelas belum tersedia.</p></div>}
           <div className="preview-footer"><span><Sparkles size={14} /> Jadwal kelasmu, selalu terbaru</span><button onClick={onSchedule}>Buka jadwal <ArrowRight size={14} /></button></div>
         </div>
         <div className="hero-orbit orbit-one" /><div className="hero-orbit orbit-two" />
+        <a className="scroll-cue" href="#tentang"><span>JELAJAHI</span><span className="scroll-cue-indicator"><i /><ArrowDownRight size={16} /></span></a>
       </section>
       <section className="landing-features" id="tentang">
-        <div className="features-intro"><span className="eyebrow">DIBUAT UNTUK HARI-HARIMU</span><h2>Lebih sedikit mencari.<br /><em>Lebih banyak menjalani.</em></h2></div>
-        <div className="feature-item"><span className="feature-icon"><CalendarDays size={18} /></span><div><h3>Jadwal satu pintu</h3><p>Agenda kelas yang rapi dan mudah dibuka kapan saja.</p></div></div>
-        <div className="feature-item"><span className="feature-icon"><ShieldCheck size={18} /></span><div><h3>Info kelas terpusat</h3><p>Informasi kelas tersedia dalam tampilan yang mudah dibuka.</p></div></div>
-        <div className="feature-item"><span className="feature-icon"><Clock3 size={18} /></span><div><h3>Waktumu tetap milikmu</h3><p>Lihat agenda harian dalam sekali pandang.</p></div></div>
+        <div className="features-intro"><span className="eyebrow">DIBUAT UNTUK HARI-HARIMU</span><h2>Lebih sedikit mencari.<br /><em>Lebih banyak menjalani.</em></h2><p>Fokus pada waktumu, bukan pada mencari informasi kelas.</p></div>
+        <div className="feature-cards">
+          <FeatureCard label="01" index={0} variant="primary">
+            <span className="feature-icon live-radar-icon"><Clock3 size={20} /><i /><i /></span>
+            <div className="live-radar-copy">
+              <div className="live-radar-title"><h3>Live Class Radar</h3><span className="feature-live-badge">WAKTU NYATA</span></div>
+              <p>Lihat kelas berikutnya, waktu mulai, dan perubahan ruang dalam satu pandangan.</p>
+              <div className="live-radar-status-row"><span className="live-radar-pulse" aria-hidden="true"><i /><i /><i /></span><span className="live-radar-status">{radarStatus}</span></div>
+              <div className="live-radar-progress" role="progressbar" aria-label="Progres kuliah hari ini" aria-valuenow={Math.round(classProgress * 100)} aria-valuemin={0} aria-valuemax={100}><span style={{ transform: `scaleX(${classProgress})` }} /></div>
+            </div>
+          </FeatureCard>
+          <FeatureCard label="02" index={1}><span className="feature-icon"><CalendarDays size={18} /></span><div><h3>Jadwal satu pintu</h3><p>Agenda kelas tersusun rapi dan mudah dibuka kapan saja.</p></div></FeatureCard>
+          <FeatureCard label="03" index={2}><span className="feature-icon"><ShieldCheck size={18} /></span><div><h3>Info kelas terpusat</h3><p>Detail ruang dan mata kuliah mudah ditemukan saat dibutuhkan.</p></div></FeatureCard>
+        </div>
       </section>
-      <footer className="landing-footer"><Brand onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} /><span>© {parts.year} Wangsa Jadwal</span></footer>
+      <section className="schedule-preview-section" aria-labelledby="schedule-preview-title">
+        <div className="schedule-preview-heading">
+          <span className="eyebrow">SATU HARI, TERLIHAT JELAS</span>
+          <h2 id="schedule-preview-title">Ritme kelasmu,<br /><em>selangkah di depan.</em></h2>
+          <p>Perubahan jadwal tercatat, supaya kamu selalu tahu langkah berikutnya.</p>
+        </div>
+        <div className="schedule-preview-card">
+          <div className="timeline-card-heading"><span>JADWAL HARIAN</span><span>{nextClassDate ? formatDate(nextClassDate, { weekday: 'long', day: 'numeric', month: 'long' }) : 'Pekan ini'}</span></div>
+          <div className="schedule-timeline">
+            {previewClasses.map((item) => (
+              <div className={item.id === currentClass?.id ? 'timeline-entry timeline-entry-active' : item.id === nextClass?.item.id ? 'timeline-entry timeline-entry-featured' : 'timeline-entry'} key={item.id}>
+                <span className="timeline-time">{item.start}</span>
+                <span className="timeline-rail"><i /></span>
+                <div className="timeline-class"><strong>{item.name}</strong><span>{item.room}</span></div>
+                {item.id === currentClass?.id && <span className="timeline-now">SEDANG BERLANGSUNG</span>}
+                {item.id === nextClass?.item.id && !currentClass && <span className="timeline-now">BERIKUTNYA</span>}
+              </div>
+            ))}
+            {previewClasses.length === 0 && <p className="timeline-empty">Jadwal berikutnya akan tampil di sini.</p>}
+          </div>
+          <div className="change-feed"><span className="change-feed-mark"><ArrowRight size={15} /></span><div><span>PEMBARUAN RUANG</span><p>Ruang <del>B-201</del> menjadi <strong>A-105</strong></p></div><time>BARU</time></div>
+        </div>
+      </section>
+      <section className="closing-cta">
+        <div className="closing-cta-glow" aria-hidden="true" />
+        <span className="eyebrow">WAKTUMU DIMULAI DARI SINI</span>
+        <h2>Satu pandangan.<br /><em>Siap menjalani harimu.</em></h2>
+        <button className="button button-gold closing-cta-button" onClick={onSchedule}>Lihat Jadwal <ArrowRight size={19} /></button>
+      </section>
+      <footer className="landing-footer">
+        <div className="landing-footer-inner">
+          <Brand onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} />
+          <div className="landing-footer-meta">
+            <span>© {parts.year} Wangsa Jadwal</span>
+            <span className="developer-sign">Dikembangkan oleh <strong>xyyuzu</strong></span>
+          </div>
+        </div>
+      </footer>
     </main>
   )
 }
@@ -349,8 +343,9 @@ function AddScheduleModal({ onClose, onSave, schedules, schedule }) {
   )
 }
 
-function SchedulePage({ schedules, setSchedules, adminMode, setAdminMode, now, storageMessage, onStorageError }) {
+function SchedulePage({ schedules, setSchedules, adminMode, setAdminMode, now, clockStatus, storageMessage, onStorageError }) {
   const [selectedDay, setSelectedDay] = useState(() => getInitialSelectedDay(getJakartaDateParts(now)))
+  const [weekOffset, setWeekOffset] = useState(0)
   const [view, setView] = useState('Harian')
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
@@ -358,8 +353,8 @@ function SchedulePage({ schedules, setSchedules, adminMode, setAdminMode, now, s
   const [filterOpen, setFilterOpen] = useState(false)
   const [groupFilter, setGroupFilter] = useState('Semua kelompok')
   const dateParts = getJakartaDateParts(now)
-  const weekStart = getWeekDate(dateParts, 'Senin')
-  const weekEnd = getWeekDate(dateParts, 'Sabtu')
+  const weekStart = getWeekDate(dateParts, 'Senin', weekOffset)
+  const weekEnd = getWeekDate(dateParts, 'Sabtu', weekOffset)
   const currentWeekday = dateParts.weekday
   const defaultSelectedDay = SCHEDULE_DAYS.includes(currentWeekday) ? currentWeekday : 'Senin'
   const todayDate = new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day))
@@ -422,7 +417,7 @@ function SchedulePage({ schedules, setSchedules, adminMode, setAdminMode, now, s
 
   const exportCalendar = () => {
     const eventRows = visibleSchedules.map((item) => {
-      const date = getNextDateForDay(dateParts, item.day, item.start)
+      const date = getWeekDate(dateParts, item.day, weekOffset)
       const stamp = (time) => `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, '0')}${String(date.getUTCDate()).padStart(2, '0')}T${time.replace(':', '')}00`
       return `BEGIN:VEVENT\nUID:${item.id}@ti26-a-jadwal\nDTSTART;TZID=Asia/Jakarta:${stamp(item.start)}\nDTEND;TZID=Asia/Jakarta:${stamp(item.end)}\nSUMMARY:${escapeCalendarText(`${item.name} (${item.code})`)}\nLOCATION:${escapeCalendarText(item.room)}\nDESCRIPTION:${escapeCalendarText(item.lecturer)} — Kelas ${escapeCalendarText(item.group)}\nEND:VEVENT`
     })
@@ -453,15 +448,21 @@ function SchedulePage({ schedules, setSchedules, adminMode, setAdminMode, now, s
       </div>
       {storageMessage && <div className="storage-warning" role="alert"><ShieldCheck size={15} />{storageMessage}</div>}
       {adminMode && <div className="admin-banner"><ShieldCheck size={16} /><span>Demo admin lokal saja; belum ada login atau izin yang aman untuk produksi.</span><button onClick={openAddSchedule}><Plus size={15} /> Tambah jadwal</button></div>}
-      {view !== 'Mingguan' && <div className="day-selector"><button className="day-arrow" onClick={() => setSelectedDay(SCHEDULE_DAYS[Math.max(0, SCHEDULE_DAYS.indexOf(selectedDay) - 1)])} aria-label="Hari sebelumnya"><ChevronLeft size={17} /></button>{SCHEDULE_DAYS.map((day) => { const date = getWeekDate(dateParts, day); const isToday = currentWeekday === day; return <button className={selectedDay === day ? 'day-tab current-day' : 'day-tab'} key={day} onClick={() => setSelectedDay(day)} aria-current={isToday ? 'date' : undefined}><span>{day.slice(0, 3)}</span><strong>{formatDate(date, { day: '2-digit' })}</strong>{isToday && <i />}</button> })}<button className="day-arrow" onClick={() => setSelectedDay(SCHEDULE_DAYS[Math.min(SCHEDULE_DAYS.length - 1, SCHEDULE_DAYS.indexOf(selectedDay) + 1)])} aria-label="Hari berikutnya"><ChevronRight size={17} /></button><span className="week-label">{weekLabel.toLocaleUpperCase('id-ID')}</span></div>}
+      <div className="week-navigation" aria-label="Navigasi pekan">
+        <button className="day-arrow" onClick={() => setWeekOffset((offset) => offset - 1)} aria-label="Pekan sebelumnya"><ChevronLeft size={17} /></button>
+        <span className="week-navigation-label">{weekLabel.toLocaleUpperCase('id-ID')}</span>
+        <button className="day-arrow" onClick={() => setWeekOffset((offset) => offset + 1)} aria-label="Pekan berikutnya"><ChevronRight size={17} /></button>
+        {weekOffset !== 0 && <button className="week-current-button" onClick={() => setWeekOffset(0)}>Pekan ini</button>}
+      </div>
+      {view !== 'Mingguan' && <div className="day-selector"><button className="day-arrow" onClick={() => setSelectedDay(SCHEDULE_DAYS[Math.max(0, SCHEDULE_DAYS.indexOf(selectedDay) - 1)])} aria-label="Hari sebelumnya"><ChevronLeft size={17} /></button>{SCHEDULE_DAYS.map((day) => { const date = getWeekDate(dateParts, day, weekOffset); const isToday = weekOffset === 0 && currentWeekday === day; return <button className={selectedDay === day ? 'day-tab current-day' : 'day-tab'} key={day} onClick={() => setSelectedDay(day)} aria-current={isToday ? 'date' : undefined}><span>{day.slice(0, 3)}</span><strong>{formatDate(date, { day: '2-digit' })}</strong>{isToday && <i />}</button> })}<button className="day-arrow" onClick={() => setSelectedDay(SCHEDULE_DAYS[Math.min(SCHEDULE_DAYS.length - 1, SCHEDULE_DAYS.indexOf(selectedDay) + 1)])} aria-label="Hari berikutnya"><ChevronRight size={17} /></button></div>}
       <div className="schedule-content">
-        <div className="day-heading"><div><span className="eyebrow">{view === 'Mingguan' ? 'AGENDA MINGGU INI' : selectedDay === currentWeekday ? 'AGENDA HARI INI' : 'AGENDA HARI PILIHAN'}</span><h2>{view === 'Mingguan' ? 'Minggu perkuliahan' : selectedDay}<span>.</span></h2></div><span className="class-count"><span /> {visibleSchedules.length} kelas terjadwal</span></div>
+        <div className="day-heading"><div><span className="eyebrow">{view === 'Mingguan' ? `AGENDA PEKAN ${weekOffset === 0 ? 'INI' : weekOffset > 0 ? 'MENDATANG' : 'SEBELUMNYA'}` : weekOffset === 0 && selectedDay === currentWeekday ? 'AGENDA HARI INI' : 'AGENDA HARI PILIHAN'}</span><h2>{view === 'Mingguan' ? `Minggu ${weekLabel}` : selectedDay}<span>.</span></h2></div><span className="class-count"><span /> {visibleSchedules.length} kelas terjadwal</span></div>
         {visibleSchedules.length > 0 ? <div className={view === 'Mingguan' || view === 'Daftar' ? 'schedule-list week-list' : 'schedule-list'}>
           {visibleSchedules.map((item) => <div className="schedule-entry" key={item.id}>{(view === 'Mingguan' || view === 'Daftar') && <div className="entry-day">{item.day}<span>{item.start}</span></div>}<ScheduleCard item={item} adminMode={adminMode} onRemove={removeSchedule} onEdit={openEditSchedule} /></div>)}
         </div> : <div className="empty-state"><span className="empty-icon"><CalendarDays size={20} /></span><h3>{search ? 'Mata kuliah tidak ditemukan' : 'Belum ada kelas hari ini'}</h3><p>{search ? 'Coba kata kunci atau nama dosen lain.' : adminMode ? 'Tambahkan jadwal untuk hari ini.' : 'Nikmati waktu kosongmu. Jadwal berikutnya segera menyusul.'}</p>{adminMode && !search && <button className="button button-gold" onClick={openAddSchedule}><Plus size={16} /> Tambah jadwal</button>}</div>}
         <div className="schedule-note"><span className="note-icon"><Sparkles size={15} /></span><div><strong>Informasi jadwal</strong><span>Pastikan jadwal yang digunakan sesuai informasi resmi dari program studi.</span></div><button aria-label="Informasi jadwal"><MoreHorizontal size={19} /></button></div>
       </div>
-      <footer className="schedule-footer"><span>wangsa<span className="gold-dot">.</span></span><span>Waktu WIB</span><button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Kembali ke atas <ArrowRight size={13} /></button></footer>
+      <footer className="schedule-footer"><span>wangsa<span className="gold-dot">.</span></span><span className="schedule-clock-status" role="status" aria-live="polite">{clockStatus === 'synced' ? 'Waktu server tersinkron · WIB' : clockStatus === 'syncing' ? 'Menyinkronkan waktu server…' : clockStatus === 'stale' ? 'Server terakhir tersinkron · WIB' : 'Waktu perangkat · WIB'}</span><button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Kembali ke atas <ArrowRight size={13} /></button></footer>
       {showModal && <AddScheduleModal onClose={() => setShowModal(false)} onSave={saveSchedule} schedules={schedules} schedule={editingSchedule} />}
     </main>
   )
@@ -473,19 +474,14 @@ function App() {
   const [schedules, setSchedules] = useState(savedScheduleState.schedules)
   const [storageMessage, setStorageMessage] = useState(savedScheduleState.error)
   const [adminMode, setAdminMode] = useState(false)
-  const [now, setNow] = useState(() => new Date())
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 30_000)
-    const refreshVisibleClock = () => {
-      if (document.visibilityState === 'visible') setNow(new Date())
+  const { now, status: clockStatus } = useServerClock()
+  const [transitionState, setTransitionState] = useState(null)
+  const reducedMotion = useReducedMotion()
+  const showSchedule = (withTransition = false) => {
+    if (withTransition) {
+      setTransitionState('in')
+      return
     }
-    document.addEventListener('visibilitychange', refreshVisibleClock)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', refreshVisibleClock)
-    }
-  }, [])
-  const showSchedule = () => {
     setPage('schedule')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -496,7 +492,30 @@ function App() {
   return (
     <div className="app-shell">
       <Header page={page} onHome={goHome} onSchedule={showSchedule} onAdmin={() => { setPage('schedule'); setAdminMode(true); window.scrollTo({ top: 0, behavior: 'smooth' }) }} />
-      {page === 'home' ? <LandingPage onSchedule={showSchedule} now={now} schedules={schedules} /> : <SchedulePage schedules={schedules} setSchedules={setSchedules} adminMode={adminMode} setAdminMode={setAdminMode} now={now} storageMessage={storageMessage} onStorageError={setStorageMessage} />}
+      {page === 'home' ? <LandingPage onSchedule={() => showSchedule(true)} now={now} schedules={schedules} /> : <SchedulePage schedules={schedules} setSchedules={setSchedules} adminMode={adminMode} setAdminMode={setAdminMode} now={now} clockStatus={clockStatus} storageMessage={storageMessage} onStorageError={setStorageMessage} />}
+      <AnimatePresence>
+        {transitionState && (
+          <motion.div
+            className="page-transition"
+            aria-hidden="true"
+            initial={reducedMotion ? { opacity: 0 } : { scaleY: 0 }}
+            animate={reducedMotion
+              ? { opacity: transitionState === 'in' ? 1 : 0 }
+              : { scaleY: transitionState === 'in' ? 1 : 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: reducedMotion ? 0.2 : 0.48, ease: [0.22, 1, 0.36, 1] }}
+            onAnimationComplete={() => {
+              if (transitionState === 'in') {
+                setPage('schedule')
+                window.scrollTo({ top: 0, behavior: 'auto' })
+                setTransitionState('out')
+              } else {
+                setTransitionState(null)
+              }
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   )
 }

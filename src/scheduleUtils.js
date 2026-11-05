@@ -7,11 +7,9 @@ export const initialSchedules = [
   { id: 1, day: 'Selasa', start: '10:50', end: '12:30', code: 'INF625101', name: 'Pengenalan Pemrograman', lecturer: 'Yessi Mulyani, S.T., M.T.; Bambang Sundari, S.Kom., M.T.; Nurrahma, M.T.', room: 'H17', group: 'A', color: 'violet', credits: 2 },
   { id: 2, day: 'Senin', start: '14:40', end: '17:10', code: 'INF625102', name: 'Algoritma Pemrograman', lecturer: 'Wahyu Eko Sulistiono, S.T., M.Sc.; Ir. Titin Yulianti, S.T., M.Eng.', room: 'H20', group: 'A', color: 'blue', credits: 3 },
   { id: 3, day: 'Kamis', start: '09:10', end: '10:50', code: 'INF625103', name: 'Kalkulus', lecturer: 'Zulmiftah Huda, S.T., M.Eng.; Nurrahma, M.T.', room: 'Mektan 3.2', group: 'A', color: 'mint', credits: 2 },
-  { id: 4, day: 'Sabtu', start: '07:00', end: '09:50', code: 'INF625104', name: 'Praktikum Pengenalan Pemrograman', lecturer: 'Yessi Mulyani, S.T., M.T.; Bambang Sundari, S.Kom., M.T.', room: 'Lab Komputer', group: 'A', color: 'peach', credits: 1 },
   { id: 5, day: 'Rabu', start: '15:30', end: '17:10', code: 'INF625105', name: 'Logika', lecturer: 'Sumadi, S.T., M.T.; Nurrahma, M.T.', room: 'H17', group: 'A', color: 'yellow', credits: 2 },
   { id: 6, day: 'Selasa', start: '13:00', end: '15:30', code: 'INF625106', name: 'Probabilitas dan Statistik', lecturer: 'Resty Annisa, S.ST., M.Kom.; Rio Ariesta Pradipta, S.Kom., M.T.I.', room: 'Mektan 3.2', group: 'A', color: 'blue', credits: 3 },
   { id: 7, day: 'Senin', start: '07:30', end: '09:10', code: 'INF625107', name: 'Teknik Digital', lecturer: 'Mona Arif Muda, S.T., M.T.; Rizkima Akbar Setiawan, S.T., M.T.', room: 'Mektan 3.1', group: 'A', color: 'mint', credits: 2 },
-  { id: 8, day: 'Sabtu', start: '09:50', end: '12:40', code: 'INF625108', name: 'Praktikum Teknik Digital', lecturer: 'Mona Arif Muda, S.T., M.T.', room: 'Lab', group: 'A', color: 'peach', credits: 1 },
   { id: 9, day: 'Jumat', start: '07:30', end: '09:10', code: 'UNI625107', name: 'Pancasila', lecturer: 'Dayu Rika Perdana, S.Pd., M.Pd.; Deny Budiyanto, S.Kom., M.T.', room: 'H5', group: 'A', color: 'yellow', credits: 2 },
   { id: 10, day: 'Selasa', start: '07:30', end: '09:10', code: 'UNI625109', name: 'Bahasa Indonesia', lecturer: 'Dr. Eka Sofia Agustina, S.Pd., M.Pd.; Ayu Setiyo Putri, S.Pd., M.Pd.', room: 'H5', group: 'A', color: 'violet', credits: 2 },
 ]
@@ -56,11 +54,12 @@ export function getMondayDate(parts) {
   return new Date(Date.UTC(parts.year, parts.month - 1, parts.day + mondayOffset))
 }
 
-export function getWeekDate(parts, weekday) {
+export function getWeekDate(parts, weekday, weekOffset = 0) {
+  if (!Number.isInteger(weekOffset)) throw new TypeError('Week offset must be an integer.')
   const monday = getMondayDate(parts)
   const dayOffset = DAYS.indexOf(weekday)
   if (dayOffset < 0) throw new RangeError(`Unknown weekday: ${weekday}`)
-  return new Date(monday.getTime() + dayOffset * 86_400_000)
+  return new Date(monday.getTime() + (weekOffset * 7 + dayOffset) * 86_400_000)
 }
 
 export function formatDate(date, options) {
