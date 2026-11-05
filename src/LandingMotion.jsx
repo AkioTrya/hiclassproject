@@ -122,34 +122,3 @@ export function ClassCountdown({ targetTime, now }) {
     </div>
   )
 }
-
-const particlePositions = [
-  { x: '11%', y: '22%', delay: 0 },
-  { x: '26%', y: '71%', delay: 2 },
-  { x: '43%', y: '15%', delay: 5 },
-  { x: '58%', y: '83%', delay: 1 },
-  { x: '73%', y: '28%', delay: 4 },
-  { x: '89%', y: '64%', delay: 3 },
-  { x: '34%', y: '48%', delay: 6 },
-  { x: '66%', y: '54%', delay: 2.5 },
-  { x: '93%', y: '14%', delay: 7 },
-]
-
-export function GoldDust() {
-  const reducedMotion = useReducedMotion()
-  if (reducedMotion) return null
-
-  return (
-    <div className="gold-dust" aria-hidden="true">
-      {particlePositions.map((particle, index) => (
-        <motion.i
-          className="gold-dust-particle"
-          key={particle.x}
-          style={{ left: particle.x, top: particle.y }}
-          animate={{ x: [0, index % 2 ? 8 : -7, 0], y: [0, -12, 0], opacity: [0.12, 0.38, 0.12] }}
-          transition={{ duration: 16 + index * 1.5, delay: particle.delay, repeat: Infinity, ease: 'easeInOut' }}
-        />
-      ))}
-    </div>
-  )
-}

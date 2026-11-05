@@ -2,17 +2,22 @@ import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 
 const CONFIG = {
-  desktopThreads: [
-    { seed: 11, x: 0.055, sway: 0.035, width: 1.25, opacity: 0.38, phase: 0.4 },
-    { seed: 47, x: 0.5, sway: 0.24, width: 1.7, opacity: 0.34, phase: 2.8 },
-    { seed: 83, x: 0.945, sway: 0.035, width: 1.4, opacity: 0.36, phase: 4.6 },
+  desktopThreadLanes: [
+    { x: [0.06, 0.17], sway: [0.018, 0.032] },
+    { x: [0.42, 0.58], sway: [0.2, 0.27] },
+    { x: [0.83, 0.95], sway: [0.018, 0.032] },
   ],
-  mobileThreads: [
-    { seed: 17, x: 0.08, sway: 0.035, width: 1.15, opacity: 0.3, phase: 1.1 },
-    { seed: 61, x: 0.57, sway: 0.23, width: 1.3, opacity: 0.31, phase: 3.7 },
+  mobileThreadLanes: [
+    { x: [0.08, 0.24], sway: [0.018, 0.03] },
+    { x: [0.52, 0.76], sway: [0.16, 0.23] },
   ],
+  threadWidth: [1, 2.5],
+  desktopThreadOpacity: [0.31, 0.43],
+  mobileThreadOpacity: [0.27, 0.36],
   desktopPoints: 80,
   mobilePoints: 40,
+  desktopDustParticles: 25,
+  mobileDustParticles: 12,
   mobileBreakpoint: 650,
   tabletBreakpoint: 900,
   maxDpr: 2,
@@ -25,6 +30,12 @@ const CONFIG = {
   pushStrength: 34,
   springStiffness: 34,
   springDamping: 12,
+  dustCursorRadius: 125,
+  dustAttraction: 0.68,
+  dustDragRadius: 32,
+  dustSpringStiffness: 18,
+  dustSpringDamping: 8,
+  dustDrift: 5,
   resizeDebounce: 120,
   glowBlur: 5,
   gold: '#D4AF37',
@@ -35,6 +46,21 @@ function hashGrid(x, y, seed) {
   let value = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(seed, 2246822519)
   value = Math.imul(value ^ (value >>> 13), 1274126177)
   return ((value ^ (value >>> 16)) >>> 0) / 4294967295
+}
+
+function randomBetween([min, max]) {
+  return min + Math.random() * (max - min)
+}
+
+function createThreadDefinitions(lanes, opacityRange) {
+  return lanes.map((lane) => ({
+    seed: Math.floor(Math.random() * 100_000),
+    x: randomBetween(lane.x),
+    sway: randomBetween(lane.sway),
+    width: randomBetween(CONFIG.threadWidth),
+    opacity: randomBetween(opacityRange),
+    phase: Math.random() * Math.PI * 2,
+  }))
 }
 
 function gradientNoise(x, y, seed) {
@@ -74,6 +100,19 @@ function createCanvasRenderer(canvas) {
   const shouldReduceMotion = () => motionPreference.matches
   const pointer = { x: 0, y: 0, active: false }
   const threads = []
+  const dustParticles = []
+  const threadDefinitions = {
+    desktop: createThreadDefinitions(CONFIG.desktopThreadLanes, CONFIG.desktopThreadOpacity),
+    mobile: createThreadDefinitions(CONFIG.mobileThreadLanes, CONFIG.mobileThreadOpacity),
+  }
+  const dustSeeds = Array.from({ length: CONFIG.desktopDustParticles }, () => ({
+    x: Math.random(),
+    y: Math.random(),
+    phase: Math.random() * Math.PI * 2,
+    radius: 1.2 + Math.random() * 1.5,
+    opacity: 0.36 + Math.random() * 0.32,
+  }))
+  let draggedParticle = -1
   let width = 0
   let height = 0
   let dpr = 1
@@ -113,12 +152,30 @@ function createCanvasRenderer(canvas) {
     canvas.style.height = `${height}px`
     context.setTransform(dpr, 0, 0, dpr, 0, 0)
     const mobile = width <= CONFIG.mobileBreakpoint
-    const definitions = mobile ? CONFIG.mobileThreads : CONFIG.desktopThreads
+    const definitions = mobile ? threadDefinitions.mobile : threadDefinitions.desktop
     const pointCount = mobile ? CONFIG.mobilePoints : CONFIG.desktopPoints
+    const dustCount = mobile ? CONFIG.mobileDustParticles : CONFIG.desktopDustParticles
     threads.splice(0, threads.length, ...definitions.map((definition) => ({
       ...definition,
       points: Array.from({ length: pointCount }, () => ({ x: 0, y: 0, offsetX: 0, offsetY: 0, velocityX: 0, velocityY: 0, influence: 0 })),
     })))
+    dustParticles.splice(0, dustParticles.length, ...Array.from({ length: dustCount }, (_, index) => {
+      const particleSeed = dustSeeds[index]
+      const baseX = particleSeed.x * width
+      const baseY = particleSeed.y * height
+      return {
+        baseX,
+        baseY,
+        x: baseX,
+        y: baseY,
+        velocityX: 0,
+        velocityY: 0,
+        phase: particleSeed.phase,
+        radius: particleSeed.radius,
+        opacity: particleSeed.opacity,
+        influence: 0,
+      }
+    }))
   }
 
   const draw = (timestamp = 0, animate = false) => {
@@ -226,6 +283,61 @@ function createCanvasRenderer(canvas) {
       }
     })
 
+    dustParticles.forEach((particle, index) => {
+      const driftX = animate ? Math.sin(time * 2.4 + particle.phase) * CONFIG.dustDrift : 0
+      const driftY = animate ? Math.cos(time * 1.8 + particle.phase) * CONFIG.dustDrift : 0
+      let targetX = particle.baseX + driftX
+      let targetY = particle.baseY + driftY
+      let influence = 0
+
+      if (animate && pointer.active) {
+        const dx = pointer.x - targetX
+        const dy = pointer.y - targetY
+        const distance = Math.hypot(dx, dy)
+        if (distance < CONFIG.dustCursorRadius) {
+          const ratio = 1 - distance / CONFIG.dustCursorRadius
+          influence = ratio * ratio * (3 - 2 * ratio)
+          targetX += dx * CONFIG.dustAttraction * influence
+          targetY += dy * CONFIG.dustAttraction * influence
+        }
+      }
+
+      if (animate && draggedParticle === index && pointer.active) {
+        targetX = pointer.x
+        targetY = pointer.y
+      }
+
+      if (animate) {
+        const accelerationX = (targetX - particle.x) * CONFIG.dustSpringStiffness - particle.velocityX * CONFIG.dustSpringDamping
+        const accelerationY = (targetY - particle.y) * CONFIG.dustSpringStiffness - particle.velocityY * CONFIG.dustSpringDamping
+        particle.velocityX += accelerationX * delta
+        particle.velocityY += accelerationY * delta
+        particle.x += particle.velocityX * delta
+        particle.y += particle.velocityY * delta
+      } else {
+        particle.x = targetX
+        particle.y = targetY
+      }
+
+      let maskOpacity = 1
+      for (const rect of maskRects) {
+        if (particle.x >= rect.left && particle.x <= rect.right && particle.y >= rect.top && particle.y <= rect.bottom) {
+          maskOpacity = Math.min(maskOpacity, rect.text ? 0.12 : 0.34)
+        }
+      }
+
+      context.save()
+      context.globalAlpha = particle.opacity * maskOpacity * (1 + influence * 0.55)
+      context.fillStyle = influence > 0.45 ? CONFIG.lightGold : CONFIG.gold
+      context.shadowColor = influence > 0.45 ? CONFIG.lightGold : CONFIG.gold
+      context.shadowBlur = 4 + influence * 8
+      context.beginPath()
+      context.arc(particle.x, particle.y, particle.radius + influence * 0.55, 0, Math.PI * 2)
+      context.fill()
+      context.restore()
+      particle.influence = influence
+    })
+
     context.globalAlpha = 1
     context.shadowBlur = 0
   }
@@ -256,19 +368,37 @@ function createCanvasRenderer(canvas) {
     }, CONFIG.resizeDebounce)
   }
   const handlePointerMove = (event) => {
-    if (shouldReduceMotion() || event.pointerType === 'touch') return
+    if (shouldReduceMotion()) return
     pointer.x = event.clientX
     pointer.y = event.clientY
     pointer.active = true
   }
-  const handlePointerLeave = () => { pointer.active = false }
+  const handlePointerDown = (event) => {
+    if (shouldReduceMotion() || event.button > 0) return
+    pointer.x = event.clientX
+    pointer.y = event.clientY
+    pointer.active = true
+    draggedParticle = dustParticles.findIndex((particle) => Math.hypot(particle.x - pointer.x, particle.y - pointer.y) <= CONFIG.dustDragRadius)
+    if (draggedParticle >= 0) {
+      document.documentElement.classList.add('gold-dust-dragging')
+      window.getSelection()?.removeAllRanges()
+    }
+  }
+  const releasePointer = () => {
+    pointer.active = false
+    draggedParticle = -1
+    document.documentElement.classList.remove('gold-dust-dragging')
+  }
+  const handlePointerLeave = () => {
+    if (draggedParticle < 0) pointer.active = false
+  }
   const handleTouchMove = (event) => {
     if (shouldReduceMotion() || !event.touches.length) return
     pointer.x = event.touches[0].clientX
     pointer.y = event.touches[0].clientY
     pointer.active = true
   }
-  const handleTouchEnd = () => { pointer.active = false }
+  const handleTouchEnd = releasePointer
   const handleVisibilityChange = () => {
     isPageActive = document.visibilityState === 'visible'
     if (isPageActive) start()
@@ -290,6 +420,9 @@ function createCanvasRenderer(canvas) {
 
   window.addEventListener('resize', resize, { passive: true })
   window.addEventListener('pointermove', handlePointerMove, { passive: true })
+  window.addEventListener('pointerdown', handlePointerDown, { passive: true })
+  window.addEventListener('pointerup', releasePointer, { passive: true })
+  window.addEventListener('pointercancel', releasePointer, { passive: true })
   window.addEventListener('pointerleave', handlePointerLeave, { passive: true })
   window.addEventListener('touchmove', handleTouchMove, { passive: true })
   window.addEventListener('touchend', handleTouchEnd, { passive: true })
@@ -306,9 +439,13 @@ function createCanvasRenderer(canvas) {
   return () => {
     disposed = true
     stop()
+    document.documentElement.classList.remove('gold-dust-dragging')
     window.clearTimeout(resizeTimer)
     window.removeEventListener('resize', resize)
     window.removeEventListener('pointermove', handlePointerMove)
+    window.removeEventListener('pointerdown', handlePointerDown)
+    window.removeEventListener('pointerup', releasePointer)
+    window.removeEventListener('pointercancel', releasePointer)
     window.removeEventListener('pointerleave', handlePointerLeave)
     window.removeEventListener('touchmove', handleTouchMove)
     window.removeEventListener('touchend', handleTouchEnd)

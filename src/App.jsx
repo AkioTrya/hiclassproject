@@ -27,7 +27,7 @@ import {
 } from 'lucide-react'
 import './App.css'
 import GoldThreadCanvas from './GoldThreadCanvas.jsx'
-import { ClassCountdown, FeatureCard, GoldDust, HeroHeadline } from './LandingMotion.jsx'
+import { ClassCountdown, FeatureCard, HeroHeadline } from './LandingMotion.jsx'
 import { useServerClock } from './useServerClock.js'
 import {
   DAYS,
@@ -153,7 +153,6 @@ function LandingPage({ onSchedule, now, schedules }) {
       <GoldThreadCanvas />
       <section className="hero-section">
         <motion.div className="hero-ambience" aria-hidden="true" animate={reducedMotion ? {} : { scale: [1, 1.04, 1], opacity: [0.35, 0.58, 0.35] }} transition={{ duration: 24, repeat: Infinity, ease: 'easeInOut' }} />
-        <GoldDust />
         <div className="hero-copy">
           <div className="eyebrow"><span className="eyebrow-dot" /> RUANG KELAS, LEBIH TERATUR</div>
           <HeroHeadline />
@@ -244,7 +243,7 @@ function LandingPage({ onSchedule, now, schedules }) {
   )
 }
 
-function ScheduleCard({ item, onRemove, onEdit, adminMode }) {
+function ScheduleCard({ item, onRemove, onEdit, onView, adminMode }) {
   return (
     <article className={`schedule-card ${item.color}`}>
       <span className="card-accent" />
@@ -255,9 +254,43 @@ function ScheduleCard({ item, onRemove, onEdit, adminMode }) {
         <p>{item.lecturer}</p>
         <div className="card-location"><MapPin size={14} /> {item.room}</div>
       </div>
-      <div className="card-type"><BookOpen size={17} /></div>
+      <button className="card-type" type="button" onClick={() => onView(item)} aria-label={`Lihat detail ${item.name}`} title="Lihat detail mata kuliah"><BookOpen size={17} /></button>
       {adminMode && <div className="card-admin-actions"><button className="edit-class" onClick={() => onEdit(item)} aria-label={`Edit ${item.name}`}><Pencil size={14} /></button><button className="remove-class" onClick={() => onRemove(item.id)} aria-label={`Hapus ${item.name}`}><X size={15} /></button></div>}
     </article>
+  )
+}
+
+function CourseDetailsDialog({ schedule, onClose }) {
+  const closeButtonRef = useRef(null)
+
+  useEffect(() => {
+    closeButtonRef.current?.focus()
+  }, [])
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <section
+        className="schedule-modal course-details-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="course-details-title"
+        onKeyDown={(event) => { if (event.key === 'Escape') onClose() }}
+      >
+        <div className="modal-heading">
+          <div><span className="eyebrow">DETAIL MATA KULIAH</span><h2 id="course-details-title">{schedule.name}</h2></div>
+          <button ref={closeButtonRef} type="button" className="icon-button" onClick={onClose} aria-label="Tutup detail"><X size={19} /></button>
+        </div>
+        <p className="course-details-code">{schedule.code} <span>·</span> {schedule.credits} SKS</p>
+        <dl className="course-details-list">
+          <div><dt>Hari</dt><dd>{schedule.day}</dd></div>
+          <div><dt>Waktu</dt><dd>{schedule.start}–{schedule.end} WIB</dd></div>
+          <div><dt>Dosen</dt><dd>{schedule.lecturer}</dd></div>
+          <div><dt>Ruang</dt><dd>{schedule.room}</dd></div>
+          <div><dt>Kelompok</dt><dd>{schedule.group === 'A' || schedule.group === 'B' ? `Kelompok ${schedule.group}` : schedule.group}</dd></div>
+        </dl>
+        <div className="modal-actions"><button type="button" className="button button-quiet" onClick={onClose}>Tutup</button></div>
+      </section>
+    </div>
   )
 }
 
@@ -350,6 +383,7 @@ function SchedulePage({ schedules, setSchedules, adminMode, setAdminMode, now, c
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [editingSchedule, setEditingSchedule] = useState(null)
+  const [viewingSchedule, setViewingSchedule] = useState(null)
   const [filterOpen, setFilterOpen] = useState(false)
   const [groupFilter, setGroupFilter] = useState('Semua kelompok')
   const dateParts = getJakartaDateParts(now)
@@ -458,11 +492,12 @@ function SchedulePage({ schedules, setSchedules, adminMode, setAdminMode, now, c
       <div className="schedule-content">
         <div className="day-heading"><div><span className="eyebrow">{view === 'Mingguan' ? `AGENDA PEKAN ${weekOffset === 0 ? 'INI' : weekOffset > 0 ? 'MENDATANG' : 'SEBELUMNYA'}` : weekOffset === 0 && selectedDay === currentWeekday ? 'AGENDA HARI INI' : 'AGENDA HARI PILIHAN'}</span><h2>{view === 'Mingguan' ? `Minggu ${weekLabel}` : selectedDay}<span>.</span></h2></div><span className="class-count"><span /> {visibleSchedules.length} kelas terjadwal</span></div>
         {visibleSchedules.length > 0 ? <div className={view === 'Mingguan' || view === 'Daftar' ? 'schedule-list week-list' : 'schedule-list'}>
-          {visibleSchedules.map((item) => <div className="schedule-entry" key={item.id}>{(view === 'Mingguan' || view === 'Daftar') && <div className="entry-day">{item.day}<span>{item.start}</span></div>}<ScheduleCard item={item} adminMode={adminMode} onRemove={removeSchedule} onEdit={openEditSchedule} /></div>)}
+          {visibleSchedules.map((item) => <div className="schedule-entry" key={item.id}>{(view === 'Mingguan' || view === 'Daftar') && <div className="entry-day">{item.day}<span>{item.start}</span></div>}<ScheduleCard item={item} adminMode={adminMode} onRemove={removeSchedule} onEdit={openEditSchedule} onView={setViewingSchedule} /></div>)}
         </div> : <div className="empty-state"><span className="empty-icon"><CalendarDays size={20} /></span><h3>{search ? 'Mata kuliah tidak ditemukan' : 'Belum ada kelas hari ini'}</h3><p>{search ? 'Coba kata kunci atau nama dosen lain.' : adminMode ? 'Tambahkan jadwal untuk hari ini.' : 'Nikmati waktu kosongmu. Jadwal berikutnya segera menyusul.'}</p>{adminMode && !search && <button className="button button-gold" onClick={openAddSchedule}><Plus size={16} /> Tambah jadwal</button>}</div>}
         <div className="schedule-note"><span className="note-icon"><Sparkles size={15} /></span><div><strong>Informasi jadwal</strong><span>Pastikan jadwal yang digunakan sesuai informasi resmi dari program studi.</span></div><button aria-label="Informasi jadwal"><MoreHorizontal size={19} /></button></div>
       </div>
       <footer className="schedule-footer"><span>wangsa<span className="gold-dot">.</span></span><span className="schedule-clock-status" role="status" aria-live="polite">{clockStatus === 'synced' ? 'Waktu server tersinkron · WIB' : clockStatus === 'syncing' ? 'Menyinkronkan waktu server…' : clockStatus === 'stale' ? 'Server terakhir tersinkron · WIB' : 'Waktu perangkat · WIB'}</span><button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Kembali ke atas <ArrowRight size={13} /></button></footer>
+      {viewingSchedule && <CourseDetailsDialog schedule={viewingSchedule} onClose={() => setViewingSchedule(null)} />}
       {showModal && <AddScheduleModal onClose={() => setShowModal(false)} onSave={saveSchedule} schedules={schedules} schedule={editingSchedule} />}
     </main>
   )
