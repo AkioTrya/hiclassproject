@@ -21,8 +21,11 @@ Copy `.env.example` to `.env` locally, or set these values as server-only enviro
 - `SUPABASE_SERVICE_ROLE_KEY`: legacy `service_role` key or a Supabase secret API key from **Project Settings → API**. Never use the `anon`/publishable key here and never expose this value to the browser.
 - `ADMIN_USERNAME` and `ADMIN_PASSWORD`: the single admin account. Use a unique password of at least 12 characters.
 - `SESSION_SECRET`: at least 32 random characters used to sign sessions. Generate one with `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"`.
+- Optional browser client: `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. The URL and publishable key are public, but direct table access still requires explicit row-level security policies. Do not put service-role/secret keys in `VITE_*` variables.
 
 Never prefix secrets with `VITE_`; Vite exposes `VITE_*` variables in browser code. `.env` files are ignored by Git.
+
+The optional browser client at `src/lib/supabase.js` uses only the public publishable key and disables client-side session persistence because admin sessions are owned by the server API. It is not used for schedule reads or writes; those continue through the server API and service-role key. A successful app build alone does not verify Supabase connectivity.
 
 ## Supabase and deployment
 
