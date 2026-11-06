@@ -14,13 +14,14 @@ import {
   Command,
   Download,
   Filter,
+  LockKeyhole,
+  LogOut,
   MapPin,
   Menu,
   MoreHorizontal,
   Pencil,
   Plus,
   Search,
-  Settings2,
   ShieldCheck,
   Sparkles,
   X,
@@ -32,7 +33,6 @@ import { useServerClock } from './useServerClock.js'
 import {
   DAYS,
   SCHEDULE_DAYS,
-  STORAGE_KEY,
   formatDate,
   getInitialSelectedDay,
   getJakartaDateParts,
@@ -42,32 +42,7 @@ import {
   isValidSchedule,
   escapeCalendarText,
 } from './scheduleUtils.js'
-
-function readSchedules() {
-  try {
-    const saved = window.localStorage.getItem(STORAGE_KEY)
-    if (!saved) return { schedules: initialSchedules, error: '' }
-    const parsed = JSON.parse(saved)
-    if (!Array.isArray(parsed) || !parsed.every(isValidSchedule)) {
-      console.error('Stored schedule data is invalid; using the included class schedule.')
-      return { schedules: initialSchedules, error: 'Data jadwal lokal tidak valid. Jadwal contoh ditampilkan.' }
-    }
-    const schedules = parsed.filter((item) => !['INF625104', 'INF625108'].includes(item.code))
-    let migrationError = ''
-    if (schedules.length !== parsed.length) {
-      try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(schedules))
-      } catch (error) {
-        console.error('Could not remove the retired Saturday practicals from saved schedules.', error)
-        migrationError = 'Praktikum Sabtu sudah dihapus dari tampilan, tetapi pembaruan belum tersimpan di perangkat ini.'
-      }
-    }
-    return { schedules, error: migrationError }
-  } catch (error) {
-    console.error('Could not read the saved class schedule.', error)
-    return { schedules: initialSchedules, error: 'Jadwal lokal tidak dapat dibaca. Jadwal contoh ditampilkan.' }
-  }
-}
+import AcademicCalendarPage from './AcademicCalendarPage.jsx'
 
 function Brand({ onClick }) {
   return (
@@ -78,7 +53,7 @@ function Brand({ onClick }) {
   )
 }
 
-function Header({ page, onHome, onSchedule, onAdmin }) {
+function Header({ page, onHome, onSchedule, onAcademic }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const navigateHome = () => {
     setMobileMenuOpen(false)
@@ -96,15 +71,14 @@ function Header({ page, onHome, onSchedule, onAdmin }) {
         <nav className={mobileMenuOpen ? 'main-nav mobile-open' : 'main-nav'} id="primary-navigation" aria-label="Navigasi utama">
           <button className={page === 'home' ? 'nav-link active' : 'nav-link'} onClick={navigateHome}>Beranda</button>
           <button className={page === 'schedule' ? 'nav-link active' : 'nav-link'} onClick={navigateSchedule}>Jadwal</button>
+          <button className={page === 'academic' ? 'nav-link active' : 'nav-link'} onClick={() => { setMobileMenuOpen(false); onAcademic() }}>Kalender akademik</button>
           <a className="nav-link" href="#tentang" onClick={navigateHome}>Tentang</a>
-          {import.meta.env.DEV && <button className="nav-link mobile-admin-link" onClick={() => { setMobileMenuOpen(false); onAdmin() }}>Demo admin</button>}
         </nav>
         <div className="topbar-actions">
           <button className="icon-button notification-button" aria-label="Pengumuman">
             <Bell size={18} /><i />
           </button>
           <button className="avatar" aria-label="Kelas A">A</button>
-          {import.meta.env.DEV && <button className="user-name" onClick={onAdmin}>Demo admin <ChevronDown size={14} /></button>}
         </div>
         <button className="mobile-menu icon-button" aria-label={mobileMenuOpen ? 'Tutup menu' : 'Buka menu'} aria-expanded={mobileMenuOpen} aria-controls="primary-navigation" onClick={() => setMobileMenuOpen((isOpen) => !isOpen)}><Menu size={20} /></button>
       </div>
@@ -301,14 +275,16 @@ function AddScheduleModal({ onClose, onSave, schedules, schedule }) {
   const [conflicts, setConflicts] = useState([])
   const [confirmConflict, setConfirmConflict] = useState(false)
   const [validationError, setValidationError] = useState('')
+  const [saving, setSaving] = useState(false)
   const update = (key, value) => {
     setForm((current) => ({ ...current, [key]: value }))
     setConflicts([])
     setConfirmConflict(false)
     setValidationError('')
   }
-  const submit = (event) => {
+  const submit = async (event) => {
     event.preventDefault()
+    if (saving) return
     const name = form.name.trim()
     const code = form.code.trim().toUpperCase()
     const lecturer = form.lecturer.trim()
@@ -351,12 +327,21 @@ function AddScheduleModal({ onClose, onSave, schedules, schedule }) {
         return
       }
     }
-    onSave({
+    setSaving(true)
+    const result = await onSave({
       ...normalizedForm,
       id: schedule?.id ?? Date.now(),
       credits,
       color: schedule?.color ?? ['violet', 'blue', 'mint', 'peach', 'yellow'][Math.floor(Math.random() * 5)],
-    })
+    }, confirmConflict)
+    setSaving(false)
+    if (!result.ok) {
+      setValidationError(result.error)
+      if (result.conflicts?.length) {
+        setConflicts(result.conflicts)
+        setConfirmConflict(true)
+      }
+    }
   }
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
@@ -370,13 +355,55 @@ function AddScheduleModal({ onClose, onSave, schedules, schedule }) {
         <div className="form-grid"><label>Ruang<input required maxLength={60} value={form.room} onChange={(e) => update('room', e.target.value)} placeholder="Ruang 302" /></label><label>Kelompok<select value={form.group} onChange={(e) => update('group', e.target.value)}><option>A</option><option>B</option><option>Semua</option></select></label></div>
         <label>SKS<input required type="number" min="1" max="6" step="1" value={form.credits} onChange={(e) => update('credits', e.target.value)} /></label>
         {conflicts.length > 0 && <div className="conflict-warning" role="alert"><ShieldCheck size={17} /><div><strong>Periksa potensi bentrok</strong><span>{conflicts.map((item) => `${item.start} ${item.name} (${item.room})`).join(' · ')}</span><small>Jadwal berbagi ruang, dosen, atau kelompok pada waktu yang sama.</small></div></div>}
-        <div className="modal-actions"><button type="button" className="button button-quiet" onClick={onClose}>Batal</button><button type="submit" className="button button-gold">{schedule ? <Check size={16} /> : <Plus size={16} />} {confirmConflict ? 'Simpan tetap' : schedule ? 'Simpan perubahan' : 'Simpan jadwal'}</button></div>
+        <div className="modal-actions"><button type="button" className="button button-quiet" onClick={onClose} disabled={saving}>Batal</button><button type="submit" className="button button-gold" disabled={saving}>{schedule ? <Check size={16} /> : <Plus size={16} />} {saving ? 'Menyimpan…' : confirmConflict ? 'Simpan tetap' : schedule ? 'Simpan perubahan' : 'Simpan jadwal'}</button></div>
       </form>
     </div>
   )
 }
 
-function SchedulePage({ schedules, setSchedules, adminMode, setAdminMode, now, clockStatus, storageMessage, onStorageError }) {
+function AdminLoginModal({ onClose, onSuccess }) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const submit = async (event) => {
+    event.preventDefault()
+    setSubmitting(true)
+    setError('')
+    try {
+      const response = await fetch('/api/admin/login', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Gagal masuk sebagai admin.')
+      onSuccess()
+    } catch (requestError) {
+      console.error('Admin sign-in failed.', requestError)
+      setError(requestError instanceof Error ? requestError.message : 'Gagal masuk sebagai admin.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <form className="schedule-modal admin-login-modal" onSubmit={submit}>
+        <div className="modal-heading"><div><span className="eyebrow">AKSES TERLINDUNGI</span><h2>Masuk admin</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Tutup"><X size={19} /></button></div>
+        <p className="admin-login-copy">Gunakan kredensial admin yang disiapkan pada environment server.</p>
+        {error && <p className="validation-error" role="alert">{error}</p>}
+        <label>Nama pengguna<input autoComplete="username" required maxLength={100} value={username} onChange={(event) => setUsername(event.target.value)} /></label>
+        <label>Kata sandi<input type="password" autoComplete="current-password" required maxLength={200} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+        <div className="modal-actions"><button type="button" className="button button-quiet" onClick={onClose} disabled={submitting}>Batal</button><button type="submit" className="button button-gold" disabled={submitting}><LockKeyhole size={15} />{submitting ? 'Memeriksa…' : 'Masuk aman'}</button></div>
+      </form>
+    </div>
+  )
+}
+
+function SchedulePage({ schedules, setSchedules, adminMode, onAdminAction, now, clockStatus, scheduleMessage, onScheduleError }) {
   const [selectedDay, setSelectedDay] = useState(() => getInitialSelectedDay(getJakartaDateParts(now)))
   const [weekOffset, setWeekOffset] = useState(0)
   const [view, setView] = useState('Harian')
@@ -408,35 +435,45 @@ function SchedulePage({ schedules, setSchedules, adminMode, setAdminMode, now, c
     .filter((item) => `${item.name} ${item.code} ${item.lecturer} ${item.room}`.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => DAYS.indexOf(a.day) - DAYS.indexOf(b.day) || a.start.localeCompare(b.start)), [schedules, view, selectedDay, groupFilter, search])
 
-  const saveSchedule = (schedule) => {
-    const updated = schedules.some((item) => item.id === schedule.id)
-      ? schedules.map((item) => item.id === schedule.id ? schedule : item)
-      : [...schedules, schedule]
+  const saveSchedule = async (schedule, allowConflicts) => {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+      const isEditing = schedules.some((item) => item.id === schedule.id)
+      const response = await fetch('/api/schedules', {
+        method: isEditing ? 'PUT' : 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...schedule, allowConflicts }),
+      })
+      const result = await response.json()
+      if (!response.ok) return { ok: false, error: result.error || 'Jadwal tidak dapat disimpan.', conflicts: result.conflicts }
+      setSchedules((current) => current.some((item) => item.id === result.id)
+        ? current.map((item) => item.id === result.id ? result : item)
+        : [...current, result])
+      onScheduleError('')
+      setSelectedDay(result.day)
+      setView('Harian')
+      setShowModal(false)
+      return { ok: true }
     } catch (error) {
-      console.error('Could not save the updated schedule.', error)
-      onStorageError('Jadwal tidak tersimpan di perangkat ini. Periksa ruang penyimpanan browser.')
-      return
+      console.error('Could not save the schedule through the server.', error)
+      return { ok: false, error: 'Server tidak dapat menyimpan jadwal. Periksa koneksi lalu coba lagi.' }
     }
-    setSchedules(updated)
-    onStorageError('')
-    setSelectedDay(schedule.day)
-    setView('Harian')
-    setShowModal(false)
   }
 
-  const removeSchedule = (id) => {
-    const updated = schedules.filter((item) => item.id !== id)
+  const removeSchedule = async (id) => {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+      const response = await fetch(`/api/schedules?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Mata kuliah tidak dapat dihapus.')
+      setSchedules((current) => current.filter((item) => item.id !== id))
+      onScheduleError('')
     } catch (error) {
-      console.error('Could not save the updated schedule.', error)
-      onStorageError('Perubahan tidak tersimpan di perangkat ini. Periksa ruang penyimpanan browser.')
-      return
+      console.error('Could not delete the schedule through the server.', error)
+      onScheduleError(error instanceof Error ? error.message : 'Server tidak dapat menghapus mata kuliah.')
     }
-    setSchedules(updated)
-    onStorageError('')
   }
 
   const openAddSchedule = () => {
@@ -477,11 +514,11 @@ function SchedulePage({ schedules, setSchedules, adminMode, setAdminMode, now, c
           <div className="search-field"><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari mata kuliah..." aria-label="Cari mata kuliah" /><kbd>⌘ K</kbd></div>
           <div className="filter-wrap"><button className={groupFilter !== 'Semua kelompok' ? 'outline-button filter-active' : 'outline-button'} onClick={() => setFilterOpen((value) => !value)}><Filter size={15} /> Filter <ChevronDown size={13} /></button>{filterOpen && <div className="filter-menu">{['Semua kelompok', 'A', 'B'].map((group) => <button key={group} onClick={() => { setGroupFilter(group); setFilterOpen(false) }}>{group === 'A' || group === 'B' ? `Kelompok ${group}` : group}{groupFilter === group && <Check size={14} />}</button>)}</div>}</div>
           <button className="outline-button export-button" onClick={exportCalendar}><Download size={15} /> <span>Ekspor .ics</span></button>
-          {import.meta.env.DEV && <button className={adminMode ? 'admin-button admin-active' : 'admin-button'} onClick={() => setAdminMode((value) => !value)}><Settings2 size={15} /> <span>{adminMode ? 'Mode demo' : 'Demo admin'}</span></button>}
+          <button className={adminMode ? 'admin-button admin-active' : 'admin-button'} onClick={onAdminAction}>{adminMode ? <LogOut size={15} /> : <LockKeyhole size={15} />} <span>{adminMode ? 'Keluar admin' : 'Masuk admin'}</span></button>
         </div>
       </div>
-      {storageMessage && <div className="storage-warning" role="alert"><ShieldCheck size={15} />{storageMessage}</div>}
-      {adminMode && <div className="admin-banner"><ShieldCheck size={16} /><span>Demo admin lokal saja; belum ada login atau izin yang aman untuk produksi.</span><button onClick={openAddSchedule}><Plus size={15} /> Tambah jadwal</button></div>}
+      {scheduleMessage && <div className="storage-warning" role="alert"><ShieldCheck size={15} />{scheduleMessage}</div>}
+      {adminMode && <div className="admin-banner"><ShieldCheck size={16} /><span>Sesi admin aktif. Perubahan disimpan ke server dan dicatat.</span><button onClick={openAddSchedule}><Plus size={15} /> Tambah jadwal</button></div>}
       <div className="week-navigation" aria-label="Navigasi pekan">
         <button className="day-arrow" onClick={() => setWeekOffset((offset) => offset - 1)} aria-label="Pekan sebelumnya"><ChevronLeft size={17} /></button>
         <span className="week-navigation-label">{weekLabel.toLocaleUpperCase('id-ID')}</span>
@@ -505,10 +542,10 @@ function SchedulePage({ schedules, setSchedules, adminMode, setAdminMode, now, c
 
 function App() {
   const [page, setPage] = useState('home')
-  const [savedScheduleState] = useState(readSchedules)
-  const [schedules, setSchedules] = useState(savedScheduleState.schedules)
-  const [storageMessage, setStorageMessage] = useState(savedScheduleState.error)
+  const [schedules, setSchedules] = useState(initialSchedules)
+  const [scheduleMessage, setScheduleMessage] = useState('Memuat jadwal dari server…')
   const [adminMode, setAdminMode] = useState(false)
+  const [loginOpen, setLoginOpen] = useState(false)
   const { now, status: clockStatus } = useServerClock()
   const [transitionState, setTransitionState] = useState(null)
   const reducedMotion = useReducedMotion()
@@ -524,10 +561,75 @@ function App() {
     setPage('home')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
+  const showAcademicCalendar = () => {
+    setPage('academic')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  const handleAdminAction = async () => {
+    if (!adminMode) {
+      setLoginOpen(true)
+      return
+    }
+    try {
+      const response = await fetch('/api/admin/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Sesi admin tidak dapat diakhiri.')
+      setAdminMode(false)
+    } catch (error) {
+      console.error('Admin sign-out failed.', error)
+      setScheduleMessage(error instanceof Error ? error.message : 'Sesi admin tidak dapat diakhiri.')
+    }
+  }
+
+  useEffect(() => {
+    let active = true
+    fetch('/api/schedules', { credentials: 'same-origin' })
+      .then(async (response) => {
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Jadwal dari server tidak dapat dimuat.')
+        if (!Array.isArray(result) || !result.every(isValidSchedule)) throw new Error('Data jadwal dari server tidak valid.')
+        if (active) {
+          setSchedules(result)
+          setScheduleMessage('')
+        }
+      })
+      .catch((error) => {
+        console.error('Could not load schedules from the server.', error)
+        if (active) setScheduleMessage('Server jadwal belum tersambung; data contoh ditampilkan sementara. Pengeditan memerlukan koneksi server.')
+      })
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    fetch('/api/admin/session', { credentials: 'same-origin' })
+      .then(async (response) => {
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Status sesi admin tidak dapat diperiksa.')
+        if (active) setAdminMode(result.authenticated === true)
+      })
+      .catch((error) => {
+        console.error('Could not check the admin session.', error)
+        if (active) setAdminMode(false)
+      })
+    return () => { active = false }
+  }, [])
+
   return (
     <div className="app-shell">
-      <Header page={page} onHome={goHome} onSchedule={showSchedule} onAdmin={() => { setPage('schedule'); setAdminMode(true); window.scrollTo({ top: 0, behavior: 'smooth' }) }} />
-      {page === 'home' ? <LandingPage onSchedule={() => showSchedule(true)} now={now} schedules={schedules} /> : <SchedulePage schedules={schedules} setSchedules={setSchedules} adminMode={adminMode} setAdminMode={setAdminMode} now={now} clockStatus={clockStatus} storageMessage={storageMessage} onStorageError={setStorageMessage} />}
+      <Header page={page} onHome={goHome} onSchedule={showSchedule} onAcademic={showAcademicCalendar} />
+      {page === 'home' && scheduleMessage && <div className="server-notice" role="status"><ShieldCheck size={15} />{scheduleMessage}</div>}
+      {page === 'home'
+        ? <LandingPage onSchedule={() => showSchedule(true)} now={now} schedules={schedules} />
+        : page === 'academic'
+          ? <AcademicCalendarPage />
+          : <SchedulePage schedules={schedules} setSchedules={setSchedules} adminMode={adminMode} onAdminAction={handleAdminAction} now={now} clockStatus={clockStatus} scheduleMessage={scheduleMessage} onScheduleError={setScheduleMessage} />}
+      {loginOpen && <AdminLoginModal onClose={() => setLoginOpen(false)} onSuccess={() => { setAdminMode(true); setLoginOpen(false) }} />}
       <AnimatePresence>
         {transitionState && (
           <motion.div

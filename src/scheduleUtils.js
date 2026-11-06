@@ -1,7 +1,6 @@
 export const DAYS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']
 export const SCHEDULE_DAYS = DAYS.slice(0, 6)
 export const TIME_ZONE = 'Asia/Jakarta'
-export const STORAGE_KEY = 'ti26-a-schedules-v1'
 
 export const initialSchedules = [
   { id: 1, day: 'Selasa', start: '10:50', end: '12:30', code: 'INF625101', name: 'Pengenalan Pemrograman', lecturer: 'Yessi Mulyani, S.T., M.T.; Bambang Sundari, S.Kom., M.T.; Nurrahma, M.T.', room: 'H17', group: 'A', color: 'violet', credits: 2 },
