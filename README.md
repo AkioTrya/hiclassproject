@@ -11,25 +11,27 @@ npm install
 npm run dev
 ```
 
-For server-backed schedules locally, create a private `.env` using `.env.example`, apply `database/schema.sql` to your Neon database, then start Vite. Its local-only middleware exposes the same API routes used by Vercel. Without server configuration the page clearly indicates that example schedule data is shown and admin edits are unavailable.
+For server-backed schedules locally, create a private `.env` using `.env.example`, apply the migration in `supabase/migrations/` to your Supabase project, then start Vite. Its local-only middleware exposes the same API routes used by Vercel. Without server configuration the page clearly indicates that example schedule data is shown and admin edits are unavailable.
 
 ## Environment variables
 
 Copy `.env.example` to `.env` locally, or set these values as server-only environment variables in Vercel:
 
-- `DATABASE_URL`: Neon Postgres connection string.
+- `SUPABASE_URL`: project URL from Supabase **Project Settings → API**.
+- `SUPABASE_SERVICE_ROLE_KEY`: legacy `service_role` key or a Supabase secret API key from **Project Settings → API**. Never use the `anon`/publishable key here and never expose this value to the browser.
 - `ADMIN_USERNAME` and `ADMIN_PASSWORD`: the single admin account. Use a unique password of at least 12 characters.
 - `SESSION_SECRET`: at least 32 random characters used to sign sessions. Generate one with `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"`.
 
 Never prefix secrets with `VITE_`; Vite exposes `VITE_*` variables in browser code. `.env` files are ignored by Git.
 
-## Database and deployment
+## Supabase and deployment
 
-1. Create a Neon Postgres database and execute [`database/schema.sql`](./database/schema.sql) in its SQL editor. This creates the schedule, login-throttling, and audit tables and inserts the initial class schedule.
-2. Set `DATABASE_URL`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `SESSION_SECRET` in the Vercel project's server environment settings. Do not commit credentials.
-3. Deploy the project to Vercel. The `api/` functions serve schedules and admin login/session/logout; the public schedule is read-only, while create/update/delete require the admin session.
+1. Create a Supabase project.
+2. In **SQL Editor**, run [`supabase/migrations/20261106160000_initial_schedule_backend.sql`](./supabase/migrations/20261106160000_initial_schedule_backend.sql). It creates the schedule, login-throttling, and audit tables, enables row-level security, restricts direct table access to `service_role`, installs atomic database functions, and inserts the initial class schedule.
+3. Configure the required environment variables in the local `.env` and Vercel project settings. Keep `SUPABASE_SERVICE_ROLE_KEY` and all admin secrets server-side; never add a `VITE_` prefix.
+4. Deploy the project to Vercel. The `api/` functions call Supabase's PostgREST API using server-only credentials. Public schedule reads are served by the API; create/update/delete require the admin session.
 
-The admin session is an HTTP-only, same-site cookie with an eight-hour expiry. Login attempts are limited in the database, writes verify same-origin requests, schedule fields and conflicts are checked again on the server, and schedule changes are recorded in `admin_audit_log`. Course schedule edits are shared through Postgres rather than browser storage.
+The admin session is an HTTP-only, same-site cookie with an eight-hour expiry. Login attempts are limited in the database, writes verify same-origin requests, schedule fields and conflicts are checked in both the API and an atomic database function, and schedule changes are recorded in `admin_audit_log`. Row-level security is enabled, and database functions are executable only by Supabase's `service_role`.
 
 ## Features
 

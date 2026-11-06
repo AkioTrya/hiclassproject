@@ -1,25 +1,31 @@
 import {
-  findScheduleConflicts,
-  getDatabase,
+  callSupabaseRpc,
+  getSupabaseConfig,
   parseRequestBody,
   RequestError,
   requireAdmin,
   requireSameOrigin,
   sendJson,
+  supabaseRequest,
   validateSchedulePayload,
 } from '../server/api.js'
 
-async function listSchedules(sql) {
-  return sql`
-    SELECT id, day, to_char(start_time, 'HH24:MI') AS start,
-      to_char(end_time, 'HH24:MI') AS end, course_code AS code,
-      name, lecturer, room, class_group AS "group", color, credits
-    FROM course_schedules
-    ORDER BY CASE day
-      WHEN 'Senin' THEN 1 WHEN 'Selasa' THEN 2 WHEN 'Rabu' THEN 3
-      WHEN 'Kamis' THEN 4 WHEN 'Jumat' THEN 5 WHEN 'Sabtu' THEN 6
-      ELSE 7 END, start_time
-  `
+const SCHEDULE_QUERY = 'course_schedules?select=id,day,start_time,end_time,course_code,name,lecturer,room,class_group,color,credits&order=day_order.asc,start_time.asc'
+
+function toSchedule(row) {
+  return {
+    id: row.id,
+    day: row.day,
+    start: row.start_time.slice(0, 5),
+    end: row.end_time.slice(0, 5),
+    code: row.course_code,
+    name: row.name,
+    lecturer: row.lecturer,
+    room: row.room,
+    group: row.class_group,
+    color: row.color,
+    credits: row.credits,
+  }
 }
 
 function returnError(res, error) {
@@ -33,95 +39,59 @@ function returnError(res, error) {
   return sendJson(res, 503, { error: 'Jadwal belum dapat diakses. Periksa konfigurasi server.' })
 }
 
+function sendMutationResult(res, result, status) {
+  if (result?.error === 'conflict') {
+    return sendJson(res, 409, {
+      error: 'Jadwal berbenturan dengan mata kuliah lain.',
+      conflicts: result.conflicts,
+    })
+  }
+  if (result?.error === 'not_found') {
+    return sendJson(res, 404, { error: 'Mata kuliah tidak ditemukan.' })
+  }
+  if (!result?.schedule) {
+    throw new Error('Supabase schedule mutation returned an invalid response.')
+  }
+  return sendJson(res, status, result.schedule)
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
-      const sql = getDatabase()
-      return sendJson(res, 200, await listSchedules(sql))
+      const supabase = getSupabaseConfig()
+      const data = await supabaseRequest(supabase, SCHEDULE_QUERY)
+      if (!Array.isArray(data)) throw new Error('Supabase returned an invalid schedule collection.')
+      return sendJson(res, 200, data.map(toSchedule))
     }
+
     if (!['POST', 'PUT', 'DELETE'].includes(req.method)) {
       res.setHeader('Allow', 'GET, POST, PUT, DELETE')
       return sendJson(res, 405, { error: 'Metode tidak diizinkan.' })
     }
     requireSameOrigin(req)
     if (!requireAdmin(req, res)) return
-    const sql = getDatabase()
+    const supabase = getSupabaseConfig()
 
     if (req.method === 'DELETE') {
       const id = Number(new URL(req.url, 'https://local.invalid').searchParams.get('id'))
       if (!Number.isSafeInteger(id) || id < 1) throw new RequestError(400, 'ID mata kuliah tidak valid.')
-      const deleted = await sql`
-        WITH removed AS (
-          DELETE FROM course_schedules WHERE id = ${id} RETURNING *
-        ), logged AS (
-          INSERT INTO admin_audit_log (action, schedule_id, schedule_data)
-          SELECT 'delete', id, to_jsonb(removed) FROM removed
-          RETURNING id
-        )
-        SELECT id FROM removed
-      `
-      if (deleted.length === 0) throw new RequestError(404, 'Mata kuliah tidak ditemukan.')
-      return sendJson(res, 200, { deleted: true })
+      const result = await callSupabaseRpc(supabase, 'mutate_course_schedule', {
+        p_action: 'delete',
+        p_schedule: { id },
+        p_allow_conflicts: false,
+      })
+      if (result?.deleted === true) return sendJson(res, 200, { deleted: true })
+      return sendMutationResult(res, result, 200)
     }
 
     const body = parseRequestBody(req)
     const schedule = validateSchedulePayload(body, { creating: req.method === 'POST' })
-    const existing = await listSchedules(sql)
-    const conflicts = findScheduleConflicts(existing, schedule)
-    if (conflicts.length && body.allowConflicts !== true) {
-      throw new RequestError(409, 'Jadwal berbenturan dengan mata kuliah lain.', conflicts)
-    }
-
-    if (req.method === 'POST') {
-      const rows = await sql`
-        WITH saved AS (
-          INSERT INTO course_schedules
-            (day, start_time, end_time, course_code, name, lecturer, room, class_group, color, credits)
-          VALUES
-            (${schedule.day}, ${schedule.start}, ${schedule.end}, ${schedule.code}, ${schedule.name},
-              ${schedule.lecturer}, ${schedule.room}, ${schedule.group}, ${schedule.color}, ${schedule.credits})
-          RETURNING *
-        ), logged AS (
-          INSERT INTO admin_audit_log (action, schedule_id, schedule_data)
-          SELECT 'create', id, to_jsonb(saved) FROM saved
-          RETURNING id
-        )
-        SELECT id, day, to_char(start_time, 'HH24:MI') AS start,
-          to_char(end_time, 'HH24:MI') AS end, course_code AS code,
-          name, lecturer, room, class_group AS "group", color, credits
-        FROM saved
-      `
-      return sendJson(res, 201, rows[0])
-    }
-
-    const rows = await sql`
-      WITH saved AS (
-        UPDATE course_schedules SET
-          day = ${schedule.day},
-          start_time = ${schedule.start},
-          end_time = ${schedule.end},
-          course_code = ${schedule.code},
-          name = ${schedule.name},
-          lecturer = ${schedule.lecturer},
-          room = ${schedule.room},
-          class_group = ${schedule.group},
-          color = ${schedule.color},
-          credits = ${schedule.credits},
-          updated_at = now()
-        WHERE id = ${schedule.id}
-        RETURNING *
-      ), logged AS (
-        INSERT INTO admin_audit_log (action, schedule_id, schedule_data)
-        SELECT 'update', id, to_jsonb(saved) FROM saved
-        RETURNING id
-      )
-      SELECT id, day, to_char(start_time, 'HH24:MI') AS start,
-        to_char(end_time, 'HH24:MI') AS end, course_code AS code,
-        name, lecturer, room, class_group AS "group", color, credits
-      FROM saved
-    `
-    if (rows.length === 0) throw new RequestError(404, 'Mata kuliah tidak ditemukan.')
-    return sendJson(res, 200, rows[0])
+    const result = await callSupabaseRpc(supabase, 'mutate_course_schedule', {
+      p_action: req.method === 'POST' ? 'create' : 'update',
+      p_schedule: schedule,
+      p_allow_conflicts: body.allowConflicts === true,
+    })
+    return sendMutationResult(res, result, req.method === 'POST' ? 201 : 200)
   } catch (error) {
     return returnError(res, error)
   }

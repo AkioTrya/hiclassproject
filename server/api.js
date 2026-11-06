@@ -1,12 +1,14 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { neon } from '@neondatabase/serverless'
 import { isValidSchedule } from '../src/scheduleUtils.js'
 
 export const SESSION_COOKIE = 'wangsa_admin'
+const SUPABASE_RPC_FUNCTIONS = new Set([
+  'is_admin_login_locked',
+  'record_admin_login_failure',
+  'clear_admin_login_failures',
+  'mutate_course_schedule',
+])
 const SESSION_TTL_SECONDS = 8 * 60 * 60
-const LOGIN_WINDOW_MINUTES = 15
-const LOGIN_MAX_ATTEMPTS = 5
-
 export function sendJson(res, status, body, headers = {}) {
   res.statusCode = status
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
@@ -15,9 +17,49 @@ export function sendJson(res, status, body, headers = {}) {
   res.end(JSON.stringify(body))
 }
 
-export function getDatabase() {
-  if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is not configured.')
-  return neon(process.env.DATABASE_URL)
+export function getSupabaseConfig() {
+  const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = process.env
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('Supabase server environment variables are not configured.')
+  }
+  let url
+  try {
+    url = new URL(SUPABASE_URL)
+  } catch {
+    throw new Error('SUPABASE_URL must be a valid URL.')
+  }
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname))) {
+    throw new Error('SUPABASE_URL must use HTTPS except for a local development instance.')
+  }
+  return { url: url.origin, serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY }
+}
+
+export async function supabaseRequest(config, path, options = {}) {
+  const response = await fetch(new URL(path, `${config.url}/rest/v1/`), {
+    ...options,
+    cache: 'no-store',
+    headers: {
+      ...options.headers,
+      apikey: config.serviceRoleKey,
+      Authorization: `Bearer ${config.serviceRoleKey}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    signal: AbortSignal.timeout(10_000),
+  })
+  const text = await response.text()
+  let data = null
+  if (text) {
+    try {
+      data = JSON.parse(text)
+    } catch {
+      throw new Error('Supabase returned a non-JSON response.')
+    }
+  }
+  if (!response.ok) {
+    throw new Error(`Supabase request failed (${response.status}): ${data?.message || response.statusText}`)
+  }
+  return data
 }
 
 export function getRequiredAuthConfig() {
@@ -173,43 +215,24 @@ export function sessionCookie(req, token, maxAge = SESSION_TTL_SECONDS) {
   return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure ? '; Secure' : ''}`
 }
 
-export async function isLoginLocked(sql, ipHash) {
-  const rows = await sql`
-    SELECT locked_until > now() AS locked
-    FROM admin_login_attempts
-    WHERE ip_hash = ${ipHash}
-  `
-  return rows[0]?.locked === true
+export async function callSupabaseRpc(config, name, args) {
+  if (!SUPABASE_RPC_FUNCTIONS.has(name)) throw new Error(`Supabase RPC is not allowed: ${name}`)
+  return supabaseRequest(config, `rpc/${name}`, {
+    method: 'POST',
+    body: JSON.stringify(args),
+  })
 }
 
-export async function recordLoginFailure(sql, ipHash) {
-  await sql`
-    INSERT INTO admin_login_attempts (ip_hash, attempts, window_started_at)
-    VALUES (${ipHash}, 1, now())
-    ON CONFLICT (ip_hash) DO UPDATE SET
-      attempts = CASE
-        WHEN admin_login_attempts.window_started_at < now() - (${LOGIN_WINDOW_MINUTES} * interval '1 minute') THEN 1
-        ELSE admin_login_attempts.attempts + 1
-      END,
-      window_started_at = CASE
-        WHEN admin_login_attempts.window_started_at < now() - (${LOGIN_WINDOW_MINUTES} * interval '1 minute') THEN now()
-        ELSE admin_login_attempts.window_started_at
-      END,
-      locked_until = CASE
-        WHEN (
-          CASE
-            WHEN admin_login_attempts.window_started_at < now() - (${LOGIN_WINDOW_MINUTES} * interval '1 minute') THEN 1
-            ELSE admin_login_attempts.attempts + 1
-          END
-        ) >= ${LOGIN_MAX_ATTEMPTS} THEN now() + (${LOGIN_WINDOW_MINUTES} * interval '1 minute')
-        ELSE NULL
-      END
-  `
-  await sql`DELETE FROM admin_login_attempts WHERE window_started_at < now() - interval '1 day'`
+export async function isLoginLocked(config, ipHash) {
+  return await callSupabaseRpc(config, 'is_admin_login_locked', { p_ip_hash: ipHash }) === true
 }
 
-export async function clearLoginFailures(sql, ipHash) {
-  await sql`DELETE FROM admin_login_attempts WHERE ip_hash = ${ipHash}`
+export async function recordLoginFailure(config, ipHash) {
+  await callSupabaseRpc(config, 'record_admin_login_failure', { p_ip_hash: ipHash })
+}
+
+export async function clearLoginFailures(config, ipHash) {
+  await callSupabaseRpc(config, 'clear_admin_login_failures', { p_ip_hash: ipHash })
 }
 
 export function getClientFingerprint(req, secret = getRequiredAuthConfig().secret) {

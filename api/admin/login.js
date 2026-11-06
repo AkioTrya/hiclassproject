@@ -2,7 +2,7 @@ import {
   clearLoginFailures,
   createSessionToken,
   getClientFingerprint,
-  getDatabase,
+  getSupabaseConfig,
   getRequiredAuthConfig,
   isLoginLocked,
   parseRequestBody,
@@ -27,16 +27,16 @@ export default async function handler(req, res) {
       throw new RequestError(400, 'Nama pengguna dan kata sandi wajib diisi.')
     }
     const config = getRequiredAuthConfig()
-    const sql = getDatabase()
+    const supabase = getSupabaseConfig()
     const fingerprint = getClientFingerprint(req, config.secret)
-    if (await isLoginLocked(sql, fingerprint)) {
+    if (await isLoginLocked(supabase, fingerprint)) {
       return sendJson(res, 429, { error: 'Terlalu banyak percobaan masuk. Coba lagi dalam 15 menit.' }, { 'Retry-After': '900' })
     }
     if (!verifyAdminCredentials(body.username, body.password, config)) {
-      await recordLoginFailure(sql, fingerprint)
+      await recordLoginFailure(supabase, fingerprint)
       return sendJson(res, 401, { error: 'Nama pengguna atau kata sandi salah.' })
     }
-    await clearLoginFailures(sql, fingerprint)
+    await clearLoginFailures(supabase, fingerprint)
     return sendJson(res, 200, { authenticated: true }, {
       'Set-Cookie': sessionCookie(req, createSessionToken(config.username, config.secret)),
     })

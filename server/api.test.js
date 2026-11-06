@@ -3,6 +3,9 @@ import test from 'node:test'
 import {
   createSessionToken,
   findScheduleConflicts,
+  getSupabaseConfig,
+  callSupabaseRpc,
+  supabaseRequest,
   validateSchedulePayload,
   verifyAdminCredentials,
   verifySessionToken,
@@ -60,4 +63,48 @@ test('compares server-configured admin credentials without accepting partial mat
   assert.equal(verifyAdminCredentials(authConfig.username, authConfig.password, authConfig), true)
   assert.equal(verifyAdminCredentials('admin ', authConfig.password, authConfig), false)
   assert.equal(verifyAdminCredentials(authConfig.username, `${authConfig.password}x`, authConfig), false)
+})
+
+test('requires a valid HTTPS Supabase project URL and server-role key', () => {
+  const previousUrl = process.env.SUPABASE_URL
+  const previousKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  try {
+    process.env.SUPABASE_URL = 'https://project-ref.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'server-only-key'
+    assert.deepEqual(getSupabaseConfig(), {
+      url: 'https://project-ref.supabase.co',
+      serviceRoleKey: 'server-only-key',
+    })
+    process.env.SUPABASE_URL = 'http://remote.example'
+    assert.throws(() => getSupabaseConfig(), /HTTPS/u)
+  } finally {
+    if (previousUrl === undefined) delete process.env.SUPABASE_URL
+    else process.env.SUPABASE_URL = previousUrl
+    if (previousKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = previousKey
+  }
+})
+
+test('sends Supabase REST and RPC calls with server-only credentials and a restricted RPC allowlist', async () => {
+  const previousFetch = globalThis.fetch
+  let captured
+  globalThis.fetch = async (url, options) => {
+    captured = { url: String(url), options }
+    return new Response(JSON.stringify(true), { status: 200 })
+  }
+  try {
+    const config = { url: 'https://project-ref.supabase.co', serviceRoleKey: 'server-only-key' }
+    assert.equal(await callSupabaseRpc(config, 'is_admin_login_locked', { p_ip_hash: 'hash' }), true)
+    assert.equal(captured.url, 'https://project-ref.supabase.co/rest/v1/rpc/is_admin_login_locked')
+    assert.equal(captured.options.headers.apikey, 'server-only-key')
+    assert.equal(captured.options.headers.Authorization, 'Bearer server-only-key')
+    assert.equal(captured.options.cache, 'no-store')
+    await assert.rejects(callSupabaseRpc(config, 'unknown_function', {}), /not allowed/u)
+    await supabaseRequest(config, 'course_schedules?select=id', {
+      headers: { Authorization: 'Bearer attacker-controlled' },
+    })
+    assert.equal(captured.options.headers.Authorization, 'Bearer server-only-key')
+  } finally {
+    globalThis.fetch = previousFetch
+  }
 })
