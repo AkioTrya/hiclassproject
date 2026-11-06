@@ -46,9 +46,9 @@ import AcademicCalendarPage from './AcademicCalendarPage.jsx'
 
 function Brand({ onClick }) {
   return (
-    <button className="brand" onClick={onClick} aria-label="Wangsa Jadwal — beranda">
-      <span className="brand-mark"><Command size={19} strokeWidth={2.1} /></span>
-      <span className="brand-name">wangsa<span>.</span></span>
+    <button className="brand" onClick={onClick} aria-label="K7A — beranda">
+      <span className="brand-mark"><img src="/k7a-logo.png" alt="" /></span>
+      <span className="brand-name">K7A<span>.</span></span>
     </button>
   )
 }
@@ -208,8 +208,8 @@ function LandingPage({ onSchedule, now, schedules }) {
         <div className="landing-footer-inner">
           <Brand onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} />
           <div className="landing-footer-meta">
-            <span>© {parts.year} Wangsa Jadwal</span>
-            <span className="developer-sign">Dikembangkan oleh <strong>xyyuzu</strong></span>
+            <span>© {parts.year} K7A</span>
+            <span className="developer-sign">Dikembangkan oleh <strong>K7YZ</strong></span>
           </div>
         </div>
       </footer>
@@ -492,7 +492,7 @@ function SchedulePage({ schedules, setSchedules, adminMode, onAdminAction, now, 
       const stamp = (time) => `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, '0')}${String(date.getUTCDate()).padStart(2, '0')}T${time.replace(':', '')}00`
       return `BEGIN:VEVENT\nUID:${item.id}@ti26-a-jadwal\nDTSTART;TZID=Asia/Jakarta:${stamp(item.start)}\nDTEND;TZID=Asia/Jakarta:${stamp(item.end)}\nSUMMARY:${escapeCalendarText(`${item.name} (${item.code})`)}\nLOCATION:${escapeCalendarText(item.room)}\nDESCRIPTION:${escapeCalendarText(item.lecturer)} — Kelas ${escapeCalendarText(item.group)}\nEND:VEVENT`
     })
-    const blob = new Blob([`BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Wangsa Jadwal//ID\nCALSCALE:GREGORIAN\n${eventRows.join('\n')}\nEND:VCALENDAR`], { type: 'text/calendar;charset=utf-8' })
+    const blob = new Blob([`BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//K7A//ID\nCALSCALE:GREGORIAN\n${eventRows.join('\n')}\nEND:VCALENDAR`], { type: 'text/calendar;charset=utf-8' })
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
     link.download = 'jadwal-ti-26-kelas-a.ics'
@@ -533,7 +533,7 @@ function SchedulePage({ schedules, setSchedules, adminMode, onAdminAction, now, 
         </div> : <div className="empty-state"><span className="empty-icon"><CalendarDays size={20} /></span><h3>{search ? 'Mata kuliah tidak ditemukan' : 'Belum ada kelas hari ini'}</h3><p>{search ? 'Coba kata kunci atau nama dosen lain.' : adminMode ? 'Tambahkan jadwal untuk hari ini.' : 'Nikmati waktu kosongmu. Jadwal berikutnya segera menyusul.'}</p>{adminMode && !search && <button className="button button-gold" onClick={openAddSchedule}><Plus size={16} /> Tambah jadwal</button>}</div>}
         <div className="schedule-note"><span className="note-icon"><Sparkles size={15} /></span><div><strong>Informasi jadwal</strong><span>Pastikan jadwal yang digunakan sesuai informasi resmi dari program studi.</span></div><button aria-label="Informasi jadwal"><MoreHorizontal size={19} /></button></div>
       </div>
-      <footer className="schedule-footer"><span>wangsa<span className="gold-dot">.</span></span><span className="schedule-clock-status" role="status" aria-live="polite">{clockStatus === 'synced' ? 'Waktu server tersinkron · WIB' : clockStatus === 'syncing' ? 'Menyinkronkan waktu server…' : clockStatus === 'stale' ? 'Server terakhir tersinkron · WIB' : 'Waktu perangkat · WIB'}</span><button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Kembali ke atas <ArrowRight size={13} /></button></footer>
+      <footer className="schedule-footer"><span className="schedule-brand"><img src="/k7a-logo.png" alt="" />K7A<span className="gold-dot">.</span></span><span className="schedule-clock-status" role="status" aria-live="polite">{clockStatus === 'synced' ? 'Waktu server tersinkron · WIB' : clockStatus === 'syncing' ? 'Menyinkronkan waktu server…' : clockStatus === 'stale' ? 'Server terakhir tersinkron · WIB' : 'Waktu perangkat · WIB'}</span><button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Kembali ke atas <ArrowRight size={13} /></button></footer>
       {viewingSchedule && <CourseDetailsDialog schedule={viewingSchedule} onClose={() => setViewingSchedule(null)} />}
       {showModal && <AddScheduleModal onClose={() => setShowModal(false)} onSave={saveSchedule} schedules={schedules} schedule={editingSchedule} />}
     </main>

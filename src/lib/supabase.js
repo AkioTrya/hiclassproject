@@ -9,5 +9,4 @@ export const supabase = supabaseEnabled
   ? createClient(url, key, {
       auth: { persistSession: true, autoRefreshToken: true },
     })
-  : null; // tanpa env, website tetap tampil dengan data demo
-
+  : null;

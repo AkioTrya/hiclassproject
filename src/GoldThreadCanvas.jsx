@@ -38,8 +38,8 @@ const CONFIG = {
   dustDrift: 5,
   resizeDebounce: 120,
   glowBlur: 5,
-  gold: '#D4AF37',
-  lightGold: '#F0D77A',
+  gold: '#0F766E',
+  lightGold: '#E76F51',
 }
 
 function hashGrid(x, y, seed) {

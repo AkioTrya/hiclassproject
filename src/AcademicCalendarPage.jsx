@@ -53,7 +53,6 @@ export default function AcademicCalendarPage() {
           {period.events.map((event, index) => (
             <li className={event.highlight ? 'academic-event highlighted' : 'academic-event'} key={`${period.id}-${event.title}`}>
               <span className="academic-event-index">{String(index + 1).padStart(2, '0')}</span>
-              <span className="academic-event-marker" aria-hidden="true" />
               <div className="academic-event-body">
                 <h3>{event.title}</h3>
                 <p className="academic-event-date">{event.date}</p>
