@@ -6,6 +6,12 @@ const localApiRoutes = new Map([
   ['/api/admin/login', () => import('./api/admin/login.js')],
   ['/api/admin/logout', () => import('./api/admin/logout.js')],
   ['/api/admin/session', () => import('./api/admin/session.js')],
+  ['/api/admin/students', () => import('./api/admin/students.js')],
+  ['/api/student/login', () => import('./api/student/login.js')],
+  ['/api/student/logout', () => import('./api/student/logout.js')],
+  ['/api/student/session', () => import('./api/student/session.js')],
+  ['/api/student/tasks', () => import('./api/student/tasks.js')],
+  ['/api/student/books', () => import('./api/student/books.js')],
 ])
 
 function localApi() {

@@ -15,6 +15,8 @@ import {
   Download,
   Filter,
   LockKeyhole,
+  Library,
+  ListTodo,
   LogOut,
   MapPin,
   Menu,
@@ -24,6 +26,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Trash2,
   X,
 } from 'lucide-react'
 import './App.css'
@@ -53,7 +56,7 @@ function Brand({ onClick, onEasterEggClick }) {
   )
 }
 
-function Header({ page, onHome, onSchedule, onAcademic, onEasterEggClick }) {
+function Header({ page, onHome, onSchedule, onAcademic, onTasks, onBooks, onEasterEggClick }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const navigateHome = () => {
     setMobileMenuOpen(false)
@@ -62,6 +65,10 @@ function Header({ page, onHome, onSchedule, onAcademic, onEasterEggClick }) {
   const navigateSchedule = () => {
     setMobileMenuOpen(false)
     onSchedule()
+  }
+  const navigateWorkspace = (navigate) => {
+    setMobileMenuOpen(false)
+    navigate()
   }
 
   return (
@@ -72,6 +79,8 @@ function Header({ page, onHome, onSchedule, onAcademic, onEasterEggClick }) {
           <button className={page === 'home' ? 'nav-link active' : 'nav-link'} onClick={navigateHome}>Beranda</button>
           <button className={page === 'schedule' ? 'nav-link active' : 'nav-link'} onClick={navigateSchedule}>Jadwal</button>
           <button className={page === 'academic' ? 'nav-link active' : 'nav-link'} onClick={() => { setMobileMenuOpen(false); onAcademic() }}>Kalender akademik</button>
+          <button className={page === 'tasks' ? 'nav-link active' : 'nav-link'} onClick={() => navigateWorkspace(onTasks)}>Tugas</button>
+          <button className={page === 'books' ? 'nav-link active' : 'nav-link'} onClick={() => navigateWorkspace(onBooks)}>Rak Ebook</button>
           <a className="nav-link" href="#tentang" onClick={navigateHome}>Tentang</a>
         </nav>
         <div className="topbar-actions">
@@ -540,6 +549,347 @@ function SchedulePage({ schedules, setSchedules, adminMode, onAdminAction, now, 
   )
 }
 
+function StudentWorkspacePage({ section, adminMode }) {
+  const [student, setStudent] = useState(null)
+  const [sessionLoading, setSessionLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [tasks, setTasks] = useState([])
+  const [books, setBooks] = useState([])
+  const [error, setError] = useState('')
+  const [login, setLogin] = useState({ username: '', password: '' })
+  const [loginBusy, setLoginBusy] = useState(false)
+  const [taskForm, setTaskForm] = useState({ title: '', courseName: '', dueDate: '' })
+  const [bookForm, setBookForm] = useState({ title: '', courseName: '', url: '' })
+  const [students, setStudents] = useState([])
+  const [accountForm, setAccountForm] = useState({ username: '', password: '' })
+  const [accountMessage, setAccountMessage] = useState('')
+  const [accountBusy, setAccountBusy] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    fetch('/api/student/session', { credentials: 'same-origin' })
+      .then(async (response) => {
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Sesi mahasiswa tidak dapat diperiksa.')
+        if (active) {
+          setStudent(result.authenticated ? result.student : null)
+          setLoading(result.authenticated)
+        }
+      })
+      .catch((requestError) => {
+        console.error('Could not check the student session.', requestError)
+        if (active) setError('Layanan akun belum tersedia. Pastikan migrasi Supabase sudah diterapkan.')
+      })
+      .finally(() => { if (active) setSessionLoading(false) })
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    if (!student) return undefined
+    let active = true
+    Promise.all(['/api/student/tasks', '/api/student/books'].map(async (path) => {
+      const response = await fetch(path, { credentials: 'same-origin' })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Data workspace tidak dapat dimuat.')
+      if (!Array.isArray(result)) throw new Error('Data workspace dari server tidak valid.')
+      return result
+    }))
+      .then(([nextTasks, nextBooks]) => {
+        if (active) {
+          setTasks(nextTasks)
+          setBooks(nextBooks)
+          setError('')
+        }
+      })
+      .catch((requestError) => {
+        console.error('Could not load student workspace data.', requestError)
+        if (active) setError(requestError.message || 'Data belum dapat dimuat.')
+      })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [student])
+
+  useEffect(() => {
+    if (!adminMode) return undefined
+    let active = true
+    fetch('/api/admin/students', { credentials: 'same-origin' })
+      .then(async (response) => {
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Daftar akun mahasiswa tidak dapat dimuat.')
+        if (active) setStudents(result)
+      })
+      .catch((requestError) => {
+        console.error('Could not load student accounts.', requestError)
+        if (active) setAccountMessage(requestError.message || 'Daftar akun belum dapat dimuat.')
+      })
+    return () => { active = false }
+  }, [adminMode])
+
+  const submitLogin = async (event) => {
+    event.preventDefault()
+    setLoginBusy(true)
+    setError('')
+    try {
+      const response = await fetch('/api/student/login', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(login),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Tidak dapat masuk.')
+      setLoading(true)
+      setStudent(result.student)
+      setLogin({ username: '', password: '' })
+    } catch (requestError) {
+      console.error('Student sign-in failed.', requestError)
+      setError(requestError.message || 'Tidak dapat masuk. Periksa koneksi lalu coba lagi.')
+    } finally {
+      setLoginBusy(false)
+    }
+  }
+
+  const signOut = async () => {
+    try {
+      const response = await fetch('/api/student/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Tidak dapat keluar.')
+      setStudent(null)
+      setTasks([])
+      setBooks([])
+    } catch (requestError) {
+      console.error('Student sign-out failed.', requestError)
+      setError(requestError.message || 'Tidak dapat keluar. Coba lagi.')
+    }
+  }
+
+  const submitTask = async (event) => {
+    event.preventDefault()
+    try {
+      const response = await fetch('/api/student/tasks', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(taskForm),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Tugas tidak dapat disimpan.')
+      setTasks((current) => [...current, result].sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999')))
+      setTaskForm({ title: '', courseName: '', dueDate: '' })
+      setError('')
+    } catch (requestError) {
+      console.error('Could not save student task.', requestError)
+      setError(requestError.message || 'Tugas tidak dapat disimpan.')
+    }
+  }
+
+  const toggleTask = async (task) => {
+    try {
+      const response = await fetch(`/api/student/tasks?id=${encodeURIComponent(task.id)}`, {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed: !task.completed }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Status tugas tidak dapat diubah.')
+      setTasks((current) => current.map((item) => item.id === result.id ? result : item))
+    } catch (requestError) {
+      console.error('Could not update student task.', requestError)
+      setError(requestError.message || 'Status tugas tidak dapat diubah.')
+    }
+  }
+
+  const deleteTask = async (task) => {
+    try {
+      const response = await fetch(`/api/student/tasks?id=${encodeURIComponent(task.id)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Tugas tidak dapat dihapus.')
+      setTasks((current) => current.filter((item) => item.id !== task.id))
+    } catch (requestError) {
+      console.error('Could not delete student task.', requestError)
+      setError(requestError.message || 'Tugas tidak dapat dihapus.')
+    }
+  }
+
+  const submitBook = async (event) => {
+    event.preventDefault()
+    try {
+      const response = await fetch('/api/student/books', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bookForm),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Ebook tidak dapat disimpan.')
+      setBooks((current) => [result, ...current])
+      setBookForm({ title: '', courseName: '', url: '' })
+      setError('')
+    } catch (requestError) {
+      console.error('Could not save ebook.', requestError)
+      setError(requestError.message || 'Ebook tidak dapat disimpan.')
+    }
+  }
+
+  const deleteBook = async (book) => {
+    try {
+      const response = await fetch(`/api/student/books?id=${encodeURIComponent(book.id)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Ebook tidak dapat dihapus.')
+      setBooks((current) => current.filter((item) => item.id !== book.id))
+    } catch (requestError) {
+      console.error('Could not delete ebook.', requestError)
+      setError(requestError.message || 'Ebook tidak dapat dihapus.')
+    }
+  }
+
+  const createStudentAccount = async (event) => {
+    event.preventDefault()
+    setAccountBusy(true)
+    setAccountMessage('')
+    try {
+      const response = await fetch('/api/admin/students', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(accountForm),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Akun mahasiswa tidak dapat dibuat.')
+      setStudents((current) => [...current, result].sort((a, b) => a.username.localeCompare(b.username)))
+      setAccountForm({ username: '', password: '' })
+      setAccountMessage(`Akun ${result.username} berhasil dibuat.`)
+    } catch (requestError) {
+      console.error('Could not create student account.', requestError)
+      setAccountMessage(requestError.message || 'Akun mahasiswa tidak dapat dibuat.')
+    } finally {
+      setAccountBusy(false)
+    }
+  }
+
+  const pendingTasks = tasks.filter((task) => !task.completed)
+  const completedTasks = tasks.filter((task) => task.completed)
+
+  return (
+    <main className="workspace-page">
+      <header className="workspace-heading">
+        <div>
+          <span className="academic-eyebrow">{section === 'tasks' ? <ListTodo size={15} /> : <Library size={15} />} RUANG BELAJAR PRIBADI</span>
+          <h1>{section === 'tasks' ? 'Daftar tugas.' : 'Rak ebook.'}</h1>
+          <p>{section === 'tasks' ? 'Catat tenggat dan tandai tugas yang sudah selesai.' : 'Simpan tautan bacaan kuliah dalam satu rak.'}</p>
+        </div>
+        {student && <div className="workspace-user"><span>{student.username}</span><button type="button" className="outline-button" onClick={signOut}><LogOut size={14} /> Keluar</button></div>}
+      </header>
+
+      {error && <div className="workspace-message" role="alert">{error}</div>}
+      {sessionLoading
+        ? <p className="workspace-empty">Memeriksa sesi akun…</p>
+        : student
+          ? loading
+            ? <p className="workspace-empty">Memuat data tersimpan…</p>
+            : section === 'tasks'
+              ? (
+                <div className="workspace-content">
+                  <form className="workspace-form task-form" onSubmit={submitTask}>
+                    <h2><Plus size={18} /> Tambah tugas</h2>
+                    <label>Nama tugas<input required maxLength={120} value={taskForm.title} onChange={(event) => setTaskForm((current) => ({ ...current, title: event.target.value }))} placeholder="Contoh: Ringkasan bab 3" /></label>
+                    <div className="workspace-form-row">
+                      <label>Mata kuliah<input maxLength={100} value={taskForm.courseName} onChange={(event) => setTaskForm((current) => ({ ...current, courseName: event.target.value }))} placeholder="Opsional" /></label>
+                      <label>Tenggat<input type="date" value={taskForm.dueDate} onChange={(event) => setTaskForm((current) => ({ ...current, dueDate: event.target.value }))} /></label>
+                    </div>
+                    <button className="button button-gold" type="submit"><Plus size={15} /> Simpan tugas</button>
+                  </form>
+                  <section className="workspace-list" aria-label="Daftar tugas">
+                    <h2>Belum selesai <span>{pendingTasks.length}</span></h2>
+                    {pendingTasks.length
+                      ? pendingTasks.map((task) => <TaskItem key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} />)
+                      : <p className="workspace-empty">Belum ada tugas aktif. Tambahkan tugas baru di atas.</p>}
+                    {completedTasks.length > 0 && <>
+                      <h2 className="completed-heading">Selesai <span>{completedTasks.length}</span></h2>
+                      {completedTasks.map((task) => <TaskItem key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} />)}
+                    </>}
+                  </section>
+                </div>
+              )
+              : (
+                <div className="workspace-content">
+                  <form className="workspace-form book-form" onSubmit={submitBook}>
+                    <h2><Plus size={18} /> Tambah ke rak</h2>
+                    <label>Judul ebook / bacaan<input required maxLength={120} value={bookForm.title} onChange={(event) => setBookForm((current) => ({ ...current, title: event.target.value }))} placeholder="Contoh: Pengantar Struktur Data" /></label>
+                    <label>Mata kuliah<input maxLength={100} value={bookForm.courseName} onChange={(event) => setBookForm((current) => ({ ...current, courseName: event.target.value }))} placeholder="Opsional" /></label>
+                    <label>Tautan bacaan<input type="url" required maxLength={2000} value={bookForm.url} onChange={(event) => setBookForm((current) => ({ ...current, url: event.target.value }))} placeholder="https://..." /></label>
+                    <button className="button button-gold" type="submit"><Plus size={15} /> Simpan bacaan</button>
+                    <p className="workspace-form-note">Rak menyimpan tautan, bukan file. Pastikan tautan hanya mengarah ke materi yang kamu berhak akses.</p>
+                  </form>
+                  <section className="workspace-list" aria-label="Rak ebook">
+                    <h2>Koleksi bacaan <span>{books.length}</span></h2>
+                    {books.length
+                      ? <div className="ebook-grid">{books.map((book) => (
+                        <article className="ebook-card" key={book.id}>
+                          <span className="ebook-cover"><BookOpen size={24} /></span>
+                          <h3>{book.title}</h3>
+                          {book.courseName && <p>{book.courseName}</p>}
+                          <div><a href={book.url} target="_blank" rel="noopener noreferrer">Buka tautan <ArrowRight size={14} /></a><button type="button" onClick={() => deleteBook(book)} aria-label={`Hapus ${book.title}`}><Trash2 size={15} /></button></div>
+                        </article>
+                      ))}</div>
+                      : <p className="workspace-empty">Rak masih kosong. Simpan tautan bacaan pertamamu.</p>}
+                  </section>
+                </div>
+              )
+          : (
+            <section className="workspace-login-panel">
+              <div><LockKeyhole size={21} /><h2>Masuk ke ruang belajarmu</h2><p>Akun mahasiswa dibuat oleh admin. Tugas dan rak bacaan hanya terlihat oleh akunmu.</p></div>
+              <form className="workspace-form" onSubmit={submitLogin}>
+                <label>Username<input autoComplete="username" required maxLength={32} value={login.username} onChange={(event) => setLogin((current) => ({ ...current, username: event.target.value }))} /></label>
+                <label>Password<input type="password" autoComplete="current-password" required maxLength={200} value={login.password} onChange={(event) => setLogin((current) => ({ ...current, password: event.target.value }))} /></label>
+                <button className="button button-gold" type="submit" disabled={loginBusy}>{loginBusy ? 'Memeriksa…' : 'Masuk'}</button>
+              </form>
+            </section>
+          )}
+
+      {adminMode && (
+        <section className="student-admin-panel">
+          <div><span className="eyebrow">KHUSUS ADMIN</span><h2>Akun mahasiswa</h2><p>Buat username dan password sementara, lalu bagikan secara pribadi kepada pemilik akun. Password tidak dapat dilihat kembali.</p></div>
+          <form className="workspace-form student-account-form" onSubmit={createStudentAccount}>
+            <label>Username<input required minLength={3} maxLength={32} pattern="[a-zA-Z0-9][a-zA-Z0-9._\-]{2,31}" value={accountForm.username} onChange={(event) => setAccountForm((current) => ({ ...current, username: event.target.value }))} /></label>
+            <label>Password awal<input type="password" required minLength={12} maxLength={200} autoComplete="new-password" value={accountForm.password} onChange={(event) => setAccountForm((current) => ({ ...current, password: event.target.value }))} /></label>
+            <button type="submit" className="button button-gold" disabled={accountBusy}><Plus size={15} />{accountBusy ? 'Membuat…' : 'Buat akun'}</button>
+            {accountMessage && <p className="workspace-form-note" role="status">{accountMessage}</p>}
+          </form>
+          <ul className="student-account-list" aria-label="Akun mahasiswa terdaftar">
+            {students.map((account) => <li key={account.id}><span>{account.username}</span><small>{new Date(account.createdAt).toLocaleDateString('id-ID')}</small></li>)}
+          </ul>
+        </section>
+      )}
+    </main>
+  )
+}
+
+function TaskItem({ task, onToggle, onDelete }) {
+  const dueLabel = task.dueDate
+    ? new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(`${task.dueDate}T00:00:00Z`))
+    : 'Tanpa tenggat'
+  return (
+    <article className={task.completed ? 'task-item completed' : 'task-item'}>
+      <label className="task-check"><input type="checkbox" checked={task.completed} onChange={() => onToggle(task)} /><span><Check size={13} /></span></label>
+      <div className="task-item-info"><h3>{task.title}</h3><p>{task.courseName || 'Umum'} <span>·</span> {dueLabel}</p></div>
+      <button type="button" className="task-delete" onClick={() => onDelete(task)} aria-label={`Hapus ${task.title}`}><Trash2 size={16} /></button>
+    </article>
+  )
+}
+
 function AmongUsEasterEgg({ onClose }) {
   const closeButtonRef = useRef(null)
 
@@ -611,6 +961,14 @@ function App() {
     setPage('academic')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
+  const showTasks = () => {
+    setPage('tasks')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  const showBooks = () => {
+    setPage('books')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
   const handleAdminAction = async () => {
     if (!adminMode) {
       setLoginOpen(true)
@@ -668,13 +1026,15 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Header page={page} onHome={goHome} onSchedule={showSchedule} onAcademic={showAcademicCalendar} onEasterEggClick={handleBrandEasterEggClick} />
+      <Header page={page} onHome={goHome} onSchedule={showSchedule} onAcademic={showAcademicCalendar} onTasks={showTasks} onBooks={showBooks} onEasterEggClick={handleBrandEasterEggClick} />
       {page === 'home' && scheduleMessage && <div className="server-notice" role="status"><ShieldCheck size={15} />{scheduleMessage}</div>}
       {page === 'home'
         ? <LandingPage onSchedule={() => showSchedule(true)} now={now} schedules={schedules} onEasterEggClick={handleBrandEasterEggClick} />
         : page === 'academic'
           ? <AcademicCalendarPage />
-          : <SchedulePage schedules={schedules} setSchedules={setSchedules} adminMode={adminMode} onAdminAction={handleAdminAction} now={now} clockStatus={clockStatus} scheduleMessage={scheduleMessage} onScheduleError={setScheduleMessage} />}
+          : page === 'tasks' || page === 'books'
+            ? <StudentWorkspacePage section={page} adminMode={adminMode} />
+            : <SchedulePage schedules={schedules} setSchedules={setSchedules} adminMode={adminMode} onAdminAction={handleAdminAction} now={now} clockStatus={clockStatus} scheduleMessage={scheduleMessage} onScheduleError={setScheduleMessage} />}
       {loginOpen && <AdminLoginModal onClose={() => setLoginOpen(false)} onSuccess={() => { setAdminMode(true); setLoginOpen(false) }} />}
       {easterEggOpen && <AmongUsEasterEgg onClose={closeEasterEgg} />}
       <AnimatePresence>

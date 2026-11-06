@@ -5,10 +5,16 @@ import {
   findScheduleConflicts,
   getSupabaseConfig,
   callSupabaseRpc,
+  createStudentSessionToken,
+  hashStudentPassword,
   supabaseRequest,
+  validateStudentPassword,
+  validateStudentUsername,
   validateSchedulePayload,
   verifyAdminCredentials,
   verifySessionToken,
+  verifyStudentPassword,
+  verifyStudentSessionToken,
 } from './api.js'
 import { initialSchedules } from '../src/scheduleUtils.js'
 
@@ -63,6 +69,33 @@ test('compares server-configured admin credentials without accepting partial mat
   assert.equal(verifyAdminCredentials(authConfig.username, authConfig.password, authConfig), true)
   assert.equal(verifyAdminCredentials('admin ', authConfig.password, authConfig), false)
   assert.equal(verifyAdminCredentials(authConfig.username, `${authConfig.password}x`, authConfig), false)
+})
+
+test('normalizes student usernames and enforces password creation requirements', () => {
+  assert.equal(validateStudentUsername('  MahaSiswa.1  '), 'mahasiswa.1')
+  assert.throws(() => validateStudentUsername('xy'), /3–32/u)
+  assert.throws(() => validateStudentUsername('bad username'), /3–32/u)
+  assert.equal(validateStudentPassword('strong-password-123'), 'strong-password-123')
+  assert.throws(() => validateStudentPassword('short'), /12–200/u)
+})
+
+test('hashes student passwords and verifies them without storing plaintext', async () => {
+  const hash = await hashStudentPassword('student-password-123')
+  assert.match(hash, /^scrypt\$16384\$/u)
+  assert.equal(hash.includes('student-password-123'), false)
+  assert.equal(await verifyStudentPassword('student-password-123', hash), true)
+  assert.equal(await verifyStudentPassword('student-password-124', hash), false)
+  assert.equal(await verifyStudentPassword('student-password-123', 'invalid'), false)
+})
+
+test('signs and expires student sessions independently of admin sessions', () => {
+  const student = { id: 21, username: 'student_21' }
+  const now = Date.parse('2026-06-18T12:00:00Z')
+  const token = createStudentSessionToken(student, authConfig.secret, now)
+  assert.deepEqual(verifyStudentSessionToken(token, authConfig.secret, now), student)
+  assert.equal(verifyStudentSessionToken(`${token}x`, authConfig.secret, now), null)
+  assert.equal(verifyStudentSessionToken(token, authConfig.secret, now + 8 * 60 * 60 * 1000), null)
+  assert.equal(verifyStudentSessionToken(token, 'another-session-secret-value-long-enough', now), null)
 })
 
 test('requires a valid HTTPS Supabase project URL and server-role key', () => {

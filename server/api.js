@@ -1,7 +1,9 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
+import { promisify } from 'node:util'
 import { isValidSchedule } from '../src/scheduleUtils.js'
 
 export const SESSION_COOKIE = 'wangsa_admin'
+export const STUDENT_SESSION_COOKIE = 'k7a_student'
 const SUPABASE_RPC_FUNCTIONS = new Set([
   'is_admin_login_locked',
   'record_admin_login_failure',
@@ -9,6 +11,8 @@ const SUPABASE_RPC_FUNCTIONS = new Set([
   'mutate_course_schedule',
 ])
 const SESSION_TTL_SECONDS = 8 * 60 * 60
+const scryptAsync = promisify(scrypt)
+
 export function sendJson(res, status, body, headers = {}) {
   res.statusCode = status
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
@@ -57,7 +61,10 @@ export async function supabaseRequest(config, path, options = {}) {
     }
   }
   if (!response.ok) {
-    throw new Error(`Supabase request failed (${response.status}): ${data?.message || response.statusText}`)
+    const error = new Error(`Supabase request failed (${response.status}): ${data?.message || response.statusText}`)
+    error.status = response.status
+    error.code = data?.code
+    throw error
   }
   return data
 }
@@ -70,6 +77,100 @@ export function getRequiredAuthConfig() {
     throw new Error('Admin authentication environment variables are not configured.')
   }
   return { username: ADMIN_USERNAME, password: ADMIN_PASSWORD, secret: SESSION_SECRET }
+}
+
+export function getSessionSecret() {
+  const { SESSION_SECRET } = process.env
+  if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
+    throw new Error('Session signing secret is not configured.')
+  }
+  return SESSION_SECRET
+}
+
+export function validateStudentUsername(value) {
+  if (typeof value !== 'string') throw new RequestError(400, 'Username harus berupa teks.')
+  const username = value.trim().toLowerCase()
+  if (!/^[a-z0-9][a-z0-9._-]{2,31}$/u.test(username)) {
+    throw new RequestError(400, 'Username harus berisi 3–32 karakter: huruf, angka, titik, garis bawah, atau tanda hubung.')
+  }
+  return username
+}
+
+export function validateStudentPassword(value) {
+  if (typeof value !== 'string' || value.length < 12 || value.length > 200) {
+    throw new RequestError(400, 'Password harus berisi 12–200 karakter.')
+  }
+  return value
+}
+
+export function hasControlCharacters(value) {
+  return [...value].some((character) => {
+    const code = character.charCodeAt(0)
+    return code <= 0x1f || (code >= 0x7f && code <= 0x9f)
+  })
+}
+
+export async function hashStudentPassword(password) {
+  const salt = randomBytes(16)
+  const derivedKey = await scryptAsync(password, salt, 64, { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 })
+  return `scrypt$16384$${salt.toString('base64url')}$${Buffer.from(derivedKey).toString('base64url')}`
+}
+
+export async function verifyStudentPassword(password, encodedHash) {
+  if (typeof password !== 'string' || typeof encodedHash !== 'string') return false
+  const [algorithm, cost, saltValue, hashValue, extra] = encodedHash.split('$')
+  if (algorithm !== 'scrypt' || cost !== '16384' || !saltValue || !hashValue || extra !== undefined) return false
+  try {
+    const salt = Buffer.from(saltValue, 'base64url')
+    const expected = Buffer.from(hashValue, 'base64url')
+    if (salt.length !== 16 || expected.length !== 64) return false
+    const actual = Buffer.from(await scryptAsync(password, salt, expected.length, {
+      N: 16384,
+      r: 8,
+      p: 1,
+      maxmem: 64 * 1024 * 1024,
+    }))
+    return timingSafeEqual(actual, expected)
+  } catch {
+    return false
+  }
+}
+
+export function createStudentSessionToken(student, secret = getSessionSecret(), now = Date.now()) {
+  const payload = Buffer.from(JSON.stringify({
+    role: 'student',
+    id: student.id,
+    username: student.username,
+    expiresAt: Math.floor(now / 1000) + SESSION_TTL_SECONDS,
+  })).toString('base64url')
+  const signature = createHmac('sha256', secret).update(payload).digest('base64url')
+  return `${payload}.${signature}`
+}
+
+export function verifyStudentSessionToken(token, secret = getSessionSecret(), now = Date.now()) {
+  if (typeof token !== 'string') return null
+  const [payload, signature, extra] = token.split('.')
+  if (!payload || !signature || extra !== undefined) return null
+  const expected = createHmac('sha256', secret).update(payload).digest()
+  let actual
+  try {
+    actual = Buffer.from(signature, 'base64url')
+  } catch {
+    return null
+  }
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null
+  try {
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
+    if (decoded.role !== 'student'
+      || !Number.isSafeInteger(decoded.id)
+      || decoded.id < 1
+      || typeof decoded.username !== 'string'
+      || !Number.isInteger(decoded.expiresAt)
+      || decoded.expiresAt <= Math.floor(now / 1000)) return null
+    return { id: decoded.id, username: decoded.username }
+  } catch {
+    return null
+  }
 }
 
 export function parseRequestBody(req) {
@@ -187,10 +288,25 @@ export function hasAdminSession(req) {
   return verifySessionToken(getCookie(req, SESSION_COOKIE))
 }
 
+export function getStudentSession(req) {
+  try {
+    return verifyStudentSessionToken(getCookie(req, STUDENT_SESSION_COOKIE))
+  } catch {
+    return null
+  }
+}
+
 export function requireAdmin(req, res) {
   if (hasAdminSession(req)) return true
   sendJson(res, 401, { error: 'Sesi admin tidak valid atau sudah berakhir.' })
   return false
+}
+
+export function requireStudent(req, res) {
+  const student = getStudentSession(req)
+  if (student) return student
+  sendJson(res, 401, { error: 'Silakan masuk dengan akun mahasiswa terlebih dahulu.' })
+  return null
 }
 
 export function requireSameOrigin(req) {
@@ -213,6 +329,11 @@ export function requireSameOrigin(req) {
 export function sessionCookie(req, token, maxAge = SESSION_TTL_SECONDS) {
   const secure = process.env.NODE_ENV === 'production' || req.headers['x-forwarded-proto'] === 'https'
   return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure ? '; Secure' : ''}`
+}
+
+export function studentSessionCookie(req, token, maxAge = SESSION_TTL_SECONDS) {
+  const secure = process.env.NODE_ENV === 'production' || req.headers['x-forwarded-proto'] === 'https'
+  return `${STUDENT_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure ? '; Secure' : ''}`
 }
 
 export async function callSupabaseRpc(config, name, args) {
