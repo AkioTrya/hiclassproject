@@ -11,7 +11,3 @@ export const supabase = supabaseEnabled
     })
   : null; // tanpa env, website tetap tampil dengan data demo
 
-if (!supabaseUrl || !supabasePublishableKey) {
-  throw new Error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY.')
-}
-
