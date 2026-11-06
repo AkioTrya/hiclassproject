@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
   ArrowDownRight,
@@ -44,16 +44,16 @@ import {
 } from './scheduleUtils.js'
 import AcademicCalendarPage from './AcademicCalendarPage.jsx'
 
-function Brand({ onClick }) {
+function Brand({ onClick, onEasterEggClick }) {
   return (
-    <button className="brand" onClick={onClick} aria-label="K7A — beranda">
+    <button className="brand" onClick={() => { onClick(); onEasterEggClick?.() }} aria-label="K7A — beranda">
       <span className="brand-mark"><img src="/k7a-logo.png" alt="" /></span>
       <span className="brand-name">K7A<span>.</span></span>
     </button>
   )
 }
 
-function Header({ page, onHome, onSchedule, onAcademic }) {
+function Header({ page, onHome, onSchedule, onAcademic, onEasterEggClick }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const navigateHome = () => {
     setMobileMenuOpen(false)
@@ -67,7 +67,7 @@ function Header({ page, onHome, onSchedule, onAcademic }) {
   return (
     <header className="topbar">
       <div className="topbar-inner">
-        <Brand onClick={navigateHome} />
+        <Brand onClick={navigateHome} onEasterEggClick={onEasterEggClick} />
         <nav className={mobileMenuOpen ? 'main-nav mobile-open' : 'main-nav'} id="primary-navigation" aria-label="Navigasi utama">
           <button className={page === 'home' ? 'nav-link active' : 'nav-link'} onClick={navigateHome}>Beranda</button>
           <button className={page === 'schedule' ? 'nav-link active' : 'nav-link'} onClick={navigateSchedule}>Jadwal</button>
@@ -86,7 +86,7 @@ function Header({ page, onHome, onSchedule, onAcademic }) {
   )
 }
 
-function LandingPage({ onSchedule, now, schedules }) {
+function LandingPage({ onSchedule, now, schedules, onEasterEggClick }) {
   const reducedMotion = useReducedMotion()
   const parts = getJakartaDateParts(now)
   const nextClass = getNextClass(schedules, parts)
@@ -206,7 +206,7 @@ function LandingPage({ onSchedule, now, schedules }) {
       </section>
       <footer className="landing-footer">
         <div className="landing-footer-inner">
-          <Brand onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} />
+          <Brand onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} onEasterEggClick={onEasterEggClick} />
           <div className="landing-footer-meta">
             <span>© {parts.year} K7A</span>
             <span className="developer-sign">Dikembangkan oleh <strong>K7YZ</strong></span>
@@ -540,15 +540,61 @@ function SchedulePage({ schedules, setSchedules, adminMode, onAdminAction, now, 
   )
 }
 
+function AmongUsEasterEgg({ onClose }) {
+  const closeButtonRef = useRef(null)
+
+  useEffect(() => {
+    closeButtonRef.current?.focus()
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
+  return (
+    <div className="modal-backdrop easter-egg-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <section className="easter-egg-modal" role="dialog" aria-modal="true" aria-labelledby="easter-egg-title">
+        <div className="easter-egg-heading">
+          <div><span className="eyebrow">EASTER EGG TERBUKA</span><h2 id="easter-egg-title">SUS! 🚨</h2></div>
+          <button ref={closeButtonRef} type="button" className="icon-button" onClick={onClose} aria-label="Tutup video"><X size={20} /></button>
+        </div>
+        <div className="easter-egg-video">
+          <iframe
+            src="https://www.youtube-nocookie.com/embed/VoQ1q41iJS0?autoplay=1&rel=0"
+            title="Video Among Us"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            referrerPolicy="strict-origin-when-cross-origin"
+            allowFullScreen
+          />
+        </div>
+      </section>
+    </div>
+  )
+}
+
 function App() {
   const [page, setPage] = useState('home')
   const [schedules, setSchedules] = useState(initialSchedules)
   const [scheduleMessage, setScheduleMessage] = useState('Memuat jadwal dari server…')
   const [adminMode, setAdminMode] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
+  const [easterEggOpen, setEasterEggOpen] = useState(false)
+  const closeEasterEgg = useCallback(() => setEasterEggOpen(false), [])
+  const brandClicks = useRef({ count: 0, lastClickAt: 0 })
   const { now, status: clockStatus } = useServerClock()
   const [transitionState, setTransitionState] = useState(null)
   const reducedMotion = useReducedMotion()
+  const handleBrandEasterEggClick = () => {
+    const now = performance.now()
+    const clickSequence = brandClicks.current
+    clickSequence.count = now - clickSequence.lastClickAt <= 1800 ? clickSequence.count + 1 : 1
+    clickSequence.lastClickAt = now
+    if (clickSequence.count === 7) {
+      clickSequence.count = 0
+      setEasterEggOpen(true)
+    }
+  }
   const showSchedule = (withTransition = false) => {
     if (withTransition) {
       setTransitionState('in')
@@ -622,14 +668,15 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Header page={page} onHome={goHome} onSchedule={showSchedule} onAcademic={showAcademicCalendar} />
+      <Header page={page} onHome={goHome} onSchedule={showSchedule} onAcademic={showAcademicCalendar} onEasterEggClick={handleBrandEasterEggClick} />
       {page === 'home' && scheduleMessage && <div className="server-notice" role="status"><ShieldCheck size={15} />{scheduleMessage}</div>}
       {page === 'home'
-        ? <LandingPage onSchedule={() => showSchedule(true)} now={now} schedules={schedules} />
+        ? <LandingPage onSchedule={() => showSchedule(true)} now={now} schedules={schedules} onEasterEggClick={handleBrandEasterEggClick} />
         : page === 'academic'
           ? <AcademicCalendarPage />
           : <SchedulePage schedules={schedules} setSchedules={setSchedules} adminMode={adminMode} onAdminAction={handleAdminAction} now={now} clockStatus={clockStatus} scheduleMessage={scheduleMessage} onScheduleError={setScheduleMessage} />}
       {loginOpen && <AdminLoginModal onClose={() => setLoginOpen(false)} onSuccess={() => { setAdminMode(true); setLoginOpen(false) }} />}
+      {easterEggOpen && <AmongUsEasterEgg onClose={closeEasterEgg} />}
       <AnimatePresence>
         {transitionState && (
           <motion.div
